@@ -1,0 +1,31 @@
+# kassensturz category rules — copy to rules.yaml and adapt.
+#
+# First match wins (order matters). Patterns are case-insensitive regexes
+# matched against the respective field; a rule fires if ANY pattern in
+# ANY listed field matches.
+
+categories:
+  - name: Gehalt
+    purpose: ["gehalt", "lohn", "salary"]
+
+  - name: Lebensmittel
+    counterparty: ["rewe", "edeka", "aldi", "lidl", "denns", "alnatura"]
+
+  - name: Miete & Wohnen
+    purpose: ["miete", "nebenkosten", "hausgeld"]
+
+  - name: Versicherung
+    counterparty: ["huk", "baloise", "haftpflichtkasse", "allianz"]
+
+  - name: Abos & Dienste
+    counterparty: ["netflix", "spotify", "apple", "amazon prime"]
+
+  - name: Bargeld
+    booking_type: ["bargeldauszahlung", "geldautomat"]
+    purpose: ["atm", "cash"]
+
+# Internal transfers between your own accounts: opposite-sign bookings of
+# the same amount within max_days are paired and marked with `category`.
+transfers:
+  category: Umbuchung
+  max_days: 3
