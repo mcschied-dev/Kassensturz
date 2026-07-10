@@ -82,10 +82,20 @@ def _load_state(state_dir: Path, name: str) -> bytes | None:
 
 
 def _save_state(state_dir: Path, name: str, data: bytes) -> None:
+    """Atomically write the (secret) client state with 0600 from the start."""
+    import os
+
     state_dir.mkdir(parents=True, exist_ok=True)
-    f = _state_file(state_dir, name)
-    f.write_bytes(data)
-    f.chmod(0o600)
+    os.chmod(state_dir, 0o700)
+    target = _state_file(state_dir, name)
+    tmp = target.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 # -- mapping -----------------------------------------------------------------

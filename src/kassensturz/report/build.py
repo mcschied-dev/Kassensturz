@@ -217,8 +217,8 @@ def build_pdf(tex_source: str, out_path: Path) -> Path:
         tex_file = Path(tmp) / "bericht.tex"
         tex_file.write_text(tex_source, encoding="utf-8")
         result = subprocess.run(
-            [latexmk, "-lualatex", "-interaction=nonstopmode", "-halt-on-error",
-             tex_file.name],
+            [latexmk, "-lualatex", "-no-shell-escape",
+             "-interaction=nonstopmode", "-halt-on-error", tex_file.name],
             cwd=tmp,
             capture_output=True,
             text=True,

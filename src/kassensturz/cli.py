@@ -90,17 +90,48 @@ def password(
     _secret_cmd(connection, delete, show)
 
 
+class TanRequired(Exception):
+    """TAN/2FA nötig, aber keine interaktive Eingabe möglich (Rundruf)."""
+
+
+def _sync_error_hint(e: Exception, conn_name: str) -> str:
+    msg = str(e).lower()
+    if "locked" in msg:
+        return "Zugang gesperrt — Webbanking entsperren, sonst 24 h warten"
+    if isinstance(e, TanRequired):
+        return f"2FA nötig → interaktiv: kassensturz sync -c {conn_name}"
+    return type(e).__name__
+
+
+def _print_rundruf_table(results: list[tuple]) -> None:
+    table = Table(title="Kontenrundruf")
+    for col in ("Bank", "Status", "Neu", "Duplikate", "Salden", "Hinweis"):
+        table.add_column(col)
+    for name, status, neu, dup, salden, hint in results:
+        color = "green" if status == "✓" else "red"
+        table.add_row(
+            name, f"[{color}]{status}[/{color}]", str(neu), str(dup), salden, hint
+        )
+    console.print(table)
+
+
 def _tan_callback(response) -> str:
     """Interactive TAN entry; decoupled = confirm in app, then Enter."""
-    if getattr(response, "decoupled", False):
-        typer.prompt(
-            f"→ In der Banking-App bestätigen: {response.challenge or 'Freigabe'}"
-            " — danach Enter",
-            default="",
-            show_default=False,
-        )
-        return ""
-    return typer.prompt(f"TAN ({response.challenge or 'siehe Gerät'})")
+    try:
+        if getattr(response, "decoupled", False):
+            typer.prompt(
+                f"→ In der Banking-App bestätigen: {response.challenge or 'Freigabe'}"
+                " — danach Enter",
+                default="",
+                show_default=False,
+            )
+            return ""
+        return typer.prompt(f"TAN ({response.challenge or 'siehe Gerät'})")
+    except (EOFError, typer.Abort) as e:
+        raise TanRequired(
+            "TAN-Eingabe erforderlich — bitte einmal interaktiv im Terminal "
+            "ausführen (kassensturz sync -c <name>)."
+        ) from e
 
 
 def _get_pin_or_prompt(name: str) -> str:
@@ -113,7 +144,12 @@ def _get_pin_or_prompt(name: str) -> str:
         f"[yellow]Keine Zugangsdaten für '{name}' im Schlüsselbund"
         f" — `kassensturz pin {name}`[/yellow]"
     )
-    return typer.prompt(f"PIN/Passwort für '{name}'", hide_input=True)
+    try:
+        return typer.prompt(f"PIN/Passwort für '{name}'", hide_input=True)
+    except (EOFError, typer.Abort) as e:
+        raise TanRequired(
+            f"Keine Zugangsdaten für '{name}' — `kassensturz pin {name}` ausführen."
+        ) from e
 
 
 def _sync_one(conn, conn_pin: str, start, end):
@@ -177,40 +213,30 @@ def sync(
     store = _store(db)
     start = date.today() - timedelta(days=days)
     today = date.today().isoformat()
+    results: list[tuple] = []  # (name, status, neu, dup, salden, hinweis)
     for conn in conns:
-        _require_product_id(conn)
         console.print(f"[cyan]Sync {conn.name}[/cyan] (ab {start.isoformat()}) …")
         try:
+            _require_product_id(conn)
             txs, skipped, balances = _sync_one(
                 conn, _get_pin_or_prompt(conn.name), start, date.today()
             )
-        except Exception as e:  # noqa: BLE001 — Banken werfen bunt
-            msg = str(e)
-            console.print(f"[red]Sync '{conn.name}' fehlgeschlagen:[/red] {msg}")
-            if "locked" in msg.lower():
-                console.print(
-                    "[yellow]Zugang vorläufig gesperrt — nicht weiter versuchen. "
-                    "Im Webbanking einloggen bzw. entsperren, sonst 24 h warten.[/yellow]"
-                )
-            elif "9010" in msg or "could not fetch BPD" in msg:
-                console.print(
-                    "[yellow]Code 9010 kann viele Ursachen haben (Produkt-ID noch "
-                    "nicht verteilt, TAN-Medium/decoupled-Problem, Anmeldename). "
-                    "Wenn Login+App-Freigabe vorher klappten, liegt es NICHT an der "
-                    "Produkt-ID.[/yellow]"
-                )
-            raise typer.Exit(1)
+        except Exception as e:  # noqa: BLE001 — Banken werfen bunt; isolieren
+            console.print(f"  [red]fehlgeschlagen:[/red] {str(e)[:160]}")
+            results.append((conn.name, "✗", 0, 0, "", _sync_error_hint(e, conn.name)))
+            continue
         inserted, dup = store.add(txs)
         store.record_balances(
             [(label, today, cents, cur, conn.name) for label, cents, cur in balances]
         )
-        console.print(
-            f"  [green]{inserted} neu[/green], [yellow]{dup} Duplikate[/yellow]"
-        )
-        for label, cents, cur in balances:
-            console.print(f"  [dim]Saldo {label}: {fmt_eur(cents, cur)}[/dim]")
         for number in skipped:
             console.print(f"  [dim]übersprungen: {number}[/dim]")
+        salden = " · ".join(fmt_eur(c, cur) for _l, c, cur in balances)
+        results.append((conn.name, "✓", inserted, dup, salden, ""))
+
+    _print_rundruf_table(results)
+    if all(r[1] == "✗" for r in results):
+        raise typer.Exit(1)
 
 
 @app.command("import-csv")
