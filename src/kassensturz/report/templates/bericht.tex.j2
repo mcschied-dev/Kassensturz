@@ -1,0 +1,136 @@
+% kassensturz — Bericht (((d.period_label|tex)))
+% Schweizer Kanon: Work Sans, asymmetrischer Satz, booktabs, reines Schwarz.
+\documentclass[10pt,parskip=half-]{scrartcl}
+
+\usepackage{fontspec}
+\usepackage{booktabs}
+\usepackage{ragged2e}
+\usepackage[ngerman]{babel}
+\usepackage[
+  a4paper,
+  left   = 25mm,
+  right  = 35mm,
+  top    = 25mm,
+  bottom = 25mm,
+]{geometry}
+
+\setmainfont{Work Sans}[
+  UprightFeatures = {RawFeature={axis={wght=400}}},
+  BoldFeatures    = {RawFeature={axis={wght=500}}},
+  AutoFakeSlant   = 0.18,
+  Numbers         = {Monospaced,Lining},
+  Ligatures       = TeX,
+]
+\renewcommand{\familydefault}{\sfdefault}
+
+\setkomafont{section}{\normalsize\bfseries}
+\setkomafont{pagefoot}{\footnotesize}
+\pagestyle{plain}
+\setlength{\parindent}{0pt}
+\RaggedRight
+
+\newcommand{\negnum}[1]{#1}
+
+\begin{document}
+
+{\LARGE\bfseries Kassensturz}\\[2mm]
+{\large Bericht (((d.period_label|tex)))}\\[1mm]
+erstellt am (((d.created|tex)))
+
+\vspace{8mm}
+
+((* if d.balances *))
+\section*{Kontostände (letzter Sync)}
+\begin{tabular}{@{}l l r@{}}
+\toprule
+Konto & Stand vom & Saldo \\
+\midrule
+((* for b in d.balances *))
+(((b.account|tex))) & (((b.date|tex))) & (((b.cents|eur(b.currency)))) \\
+((* endfor *))
+\midrule
+\textbf{Gesamt (EUR)} & & \textbf{(((d.balance_total_cents|eur)))} \\
+\bottomrule
+\end{tabular}
+
+\vspace{8mm}
+((* endif *))
+
+\section*{Einnahmen und Ausgaben}
+\begin{tabular}{@{}l r@{}}
+\toprule
+Einnahmen & (((d.income_cents|eur))) \\
+Ausgaben  & (((d.expense_cents|eur))) \\
+\midrule
+\textbf{Saldo (laufend)} & \textbf{((((d.income_cents + d.expense_cents)|eur)))} \\
+((* if d.special_cents *))
+\midrule
+Sondereffekte & (((d.special_cents|eur))) \\
+\textbf{Saldo inkl.\ Sondereffekte} &
+  \textbf{((((d.income_cents + d.expense_cents + d.special_cents)|eur)))} \\
+((* endif *))
+\bottomrule
+\end{tabular}
+
+\medskip
+{\footnotesize Umbuchungen zwischen eigenen Konten sind neutralisiert.
+Sondereffekte (einmalige Ereignisse wie Exits) sind aus dem laufenden
+Saldo herausgerechnet.
+(((d.tx_count))) Buchungen im Zeitraum, davon (((d.uncategorized_count)))
+unkategorisiert.}
+
+\vspace{8mm}
+
+((* if d.year_rows *))
+\section*{Kategorien nach Jahren}
+{\footnotesize
+\begin{tabular}{@{}l ((* for y in d.years *))r((* endfor *)) r@{}}
+\toprule
+Kategorie ((* for y in d.years *))& (((y))) ((* endfor *))& \textbf{Gesamt} \\
+\midrule
+((* for row in d.year_rows *))
+(((row.name|tex))) ((* for y in d.years *))& ((* if y in row.cells *))(((row.cells[y]|betrag)))((* endif *)) ((* endfor *))& (((row.total|betrag))) \\
+((* endfor *))
+\bottomrule
+\end{tabular}
+
+\medskip
+Beträge in EUR.
+}
+((* else *))
+\section*{Kategorien}
+\begin{tabular}{@{}l r r@{}}
+\toprule
+Kategorie & Buchungen & Summe \\
+\midrule
+((* for c in d.categories *))
+(((c.name|tex))) & (((c.n))) & (((c.cents|eur(c.currency)))) \\
+((* endfor *))
+\bottomrule
+\end{tabular}
+((* endif *))
+
+((* if d.focus *))
+\clearpage
+((* for f in d.focus *))
+\section*{(((f.name|tex))) — Historie}
+\begin{tabular}{@{}l r r@{}}
+\toprule
+Jahr & Zahlungen & Summe \\
+\midrule
+((* for y in f.years *))
+(((y.year|tex))) & (((y.n))) & (((y.cents|eur))) \\
+((* endfor *))
+\midrule
+\textbf{Gesamt} & \textbf{(((f.total_n)))} & \textbf{(((f.total_cents|eur)))} \\
+\bottomrule
+\end{tabular}
+
+\vspace{8mm}
+((* endfor *))
+((* endif *))
+
+\vfill
+{\footnotesize kassensturz — lokale Auswertung, keine Daten verlassen diesen Rechner.}
+
+\end{document}

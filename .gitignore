@@ -7,12 +7,17 @@ build/
 *.egg-info/
 .pytest_cache/
 
-# kassensturz data — NEVER commit real transactions
+# kassensturz data & secrets — NEVER commit
 *.db
 *.sqlite*
 rules.yaml
+config.yaml
 exports/
-reports/*.pdf
+reports/
+csv/
+*.pem
+.pytr/
+state/
 
 # OS
 .DS_Store

@@ -71,6 +71,73 @@ def test_summary_and_set_category():
     assert "(unkategorisiert)" in cats
 
 
+def test_adopt_categories_only_fills_null():
+    store = Store(":memory:")
+    a = tx(purpose="a")
+    b = tx(purpose="b")
+    store.add([a, b])
+    rows = store.query()
+    # rule already categorized one row — adoption must not touch it
+    store.set_category([r["hash"] for r in rows if r["purpose"] == "a"], "Regel")
+    from dataclasses import replace
+
+    adopted = store.adopt_categories(
+        [replace(a, category="Bank-Kat"), replace(b, category="Bank-Kat")]
+    )
+    assert adopted == 1
+    cats = {r["purpose"]: r["category"] for r in store.query()}
+    assert cats == {"a": "Regel", "b": "Bank-Kat"}
+
+
+def test_balances_snapshot_and_latest():
+    store = Store(":memory:")
+    store.record_balances([("dkb-giro", "2026-07-01", 100000, "EUR", "dkb")])
+    store.record_balances(
+        [
+            ("dkb-giro", "2026-07-03", 120000, "EUR", "dkb"),
+            ("dkb-tagesgeld", "2026-07-03", 54000000, "EUR", "dkb"),
+        ]
+    )
+    # same account+date overwrites instead of duplicating
+    store.record_balances([("dkb-giro", "2026-07-03", 125000, "EUR", "dkb")])
+    latest = {r["account"]: r["balance_cents"] for r in store.latest_balances()}
+    assert latest == {"dkb-giro": 125000, "dkb-tagesgeld": 54000000}
+
+
+def test_balances_at_three_statuses():
+    store = Store(":memory:")
+    # "old" account: history reaches past the Stichtag
+    store.add(
+        [
+            tx(account="alt", booking_date=date(2022, 3, 1), amount=Decimal("100.00")),
+            tx(account="alt", booking_date=date(2024, 6, 1), amount=Decimal("-40.00")),
+        ]
+    )
+    # "new" account: opened after Stichtag, fully covered (sum == balance)
+    store.add(
+        [tx(account="neu", booking_date=date(2024, 2, 1), amount=Decimal("500.00"))]
+    )
+    # "gap" account: history starts after Stichtag but doesn't explain balance
+    store.add(
+        [tx(account="luecke", booking_date=date(2024, 2, 1), amount=Decimal("10.00"))]
+    )
+    store.record_balances(
+        [
+            ("alt", "2026-07-03", 20000, "EUR", "t"),      # heute 200 €
+            ("neu", "2026-07-03", 50000, "EUR", "t"),      # 500 € = Summe
+            ("luecke", "2026-07-03", 99900, "EUR", "t"),   # 999 € ≠ 10 €
+        ]
+    )
+    result = {r["account"]: r for r in store.balances_at("2023-05-05")}
+    # alt: 200 € heute minus (-40 €) nach Stichtag = 240 €
+    assert result["alt"]["status"] == "ok"
+    assert result["alt"]["balance_cents"] == 24000
+    assert result["neu"]["status"] == "nicht_existent"
+    assert result["neu"]["balance_cents"] == 0
+    assert result["luecke"]["status"] == "unbekannt"
+    assert result["luecke"]["balance_cents"] is None
+
+
 def test_fmt_eur():
     assert fmt_eur(-123456) == "-1.234,56 €"
     assert fmt_eur(350000) == "3.500,00 €"

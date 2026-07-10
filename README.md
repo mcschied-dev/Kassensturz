@@ -11,16 +11,38 @@ all on your own machine. No cloud, no third-party aggregator.
 
 Early. Working today:
 
+- **FinTS/HBCI sync** (`sync`) — pull transactions directly from your bank
+  (Sparkasse, ...). PINs live in the system keychain, client state is
+  persisted per connection so SCA is only triggered when the bank insists.
+  Decoupled TAN (pushTAN: confirm in the app) and classic TAN supported.
+- **DKB sync** via the bank's web/REST API (`dkb-robo`) — checking accounts
+  and credit cards, no FinTS product ID required; confirm login in the
+  DKB app.
 - **CSV import** for DKB ("neues Banking" export), Sparkasse (CAMT-CSV),
   and a generic format — with encoding/format quirks handled
 - **SQLite store** with safe dedup (re-importing overlapping exports is a no-op)
 - **Rule-based categorization** (YAML, first match wins)
 - **Transfer matching** — opposite-sign bookings between your own accounts
   are paired as internal transfers, so cashflow stats aren't polluted
-- **CLI**: `import-csv`, `list`, `categorize`, `summary`, `accounts`, `export-csv`
+- **CLI**: `sync`, `pin`, `import-csv`, `list`, `categorize`, `summary`,
+  `accounts`, `export-csv`
 
-Planned (in order): FinTS sync (DKB, Sparkasse) · Trade Republic via `pytr` ·
-LaTeX report templates (German) · XLSX export · AI-agent skill.
+Planned (in order): Trade Republic via `pytr` · LaTeX report templates
+(German) · XLSX export · AI-agent skill.
+
+### FinTS setup
+
+```bash
+cp config.example.yaml ~/.kassensturz/config.yaml   # then edit
+kassensturz pin spk        # store PIN in the system keychain
+kassensturz sync           # first run picks the TAN mechanism interactively
+```
+
+You need your institute's FinTS endpoint URL (see comments in
+`config.example.yaml`) and a **registered FinTS product ID** — mandatory,
+no fallback exists. Registration is free via
+[Deutsche Kreditwirtschaft](https://www.fints.org/de/hersteller/produktregistrierung);
+until it arrives, use your bank's CSV export with `import-csv`.
 
 ## Quickstart
 
@@ -46,7 +68,7 @@ The database lives at `~/.kassensturz/kassensturz.db` by default
 
 ## Design
 
-```
+```text
 connectors (csv, fints, pytr)  →  canonical Transaction model
                                →  SQLite (append-only + dedup)
                                →  categorize (YAML rules + transfer matching)

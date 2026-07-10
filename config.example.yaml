@@ -1,0 +1,59 @@
+# kassensturz bank connections — copy to ~/.kassensturz/config.yaml.
+#
+# NO secrets in here: PINs live in the system keychain,
+# stored via `kassensturz pin <name>`.
+#
+# Finding your institute's FinTS endpoint:
+#   - look up your BLZ in the hbci4java bank database:
+#     https://raw.githubusercontent.com/hbci4j/hbci4java/master/src/main/resources/blz.properties
+#   - Sparkasse URLs look like https://banking-XXn.s-fints-pt-XX.de/fints30
+#   - DKB: https://banking-dkb.s-fints-pt-dkb.de/fints30
+#
+# product_id is MANDATORY: FinTS clients must be registered with Deutsche
+# Kreditwirtschaft (free, https://www.fints.org/de/hersteller/produktregistrierung).
+# python-fints refuses to connect without one — there is no fallback.
+# Until yours arrives, use the bank's CSV export + `kassensturz import-csv`.
+
+fints:
+  - name: spk
+    blz: "75050000"                # your Sparkasse's BLZ
+    username: "1234567890"         # online banking login
+    endpoint: https://banking-by5.s-fints-pt-by.de/fints30
+    product_id: "YOUR-DK-PRODUCT-ID"
+    accounts:                      # IBAN → kassensturz account label;
+      DE00750500000000000000: spk-giro   # omit block to sync all accounts
+
+  # - name: dkb-fints          # DKB via FinTS (needs product_id too)
+  #   blz: "12030000"
+  #   username: "..."
+  #   endpoint: https://banking-dkb.s-fints-pt-dkb.de/fints30
+  #   accounts:
+  #     DE00120300000000000000: dkb-giro
+
+# DKB via its web/REST API (dkb-robo) — NO product_id needed. Login asks
+# for confirmation in the DKB app on every sync. Password is stored the
+# same way: `kassensturz pin dkb`.
+dkb:
+  - name: dkb
+    username: "your-dkb-login"
+    accounts:                      # IBAN / card number → label;
+      DE00120300000000000000: dkb-giro   # omit block to sync everything
+
+# Wise via the official API. Token: `kassensturz pin wise` (create a
+# read-only token at wise.com → Settings → API tokens). Balances work
+# with the token alone; statements (transactions) additionally need an
+# RSA key pair whose PUBLIC key is uploaded to Wise:
+#   openssl genrsa -out ~/.kassensturz/wise-private.pem 2048
+#   openssl rsa -pubout -in ~/.kassensturz/wise-private.pem -out wise-public.pem
+wise:
+  - name: wise
+    private_key: ~/.kassensturz/wise-private.pem   # omit → balances only
+    # profile_id: 12345678                         # auto-discovered if omitted
+
+# Trade Republic via pytr. PIN: `kassensturz pin tr`. First sync asks for
+# a 2FA code (TR app notification or SMS); the session is then cached under
+# ~/.pytr. Scope: portfolio + cash balance snapshot for the net-worth view
+# (savings-plan debits already appear on the funding account).
+traderepublic:
+  - name: tr
+    phone: "+4915112345678"

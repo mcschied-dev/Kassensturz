@@ -26,7 +26,41 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(booking_date);
 CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account);
 CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category);
+
+CREATE TABLE IF NOT EXISTS balances (
+  account TEXT NOT NULL,
+  snapshot_date TEXT NOT NULL,
+  balance_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'EUR',
+  source TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (account, snapshot_date)
+);
 """
+
+
+_DATE_LIKE = " AND booking_date LIKE ?"
+
+
+def build_year_matrix(rows) -> tuple[list[str], list[dict]]:
+    """Pivot summary_by_year rows → (years, [{name, cells{year:cents}, total}])."""
+    years = sorted({r["year"] for r in rows})
+    by_cat: dict[str, dict] = {}
+    for r in rows:
+        e = by_cat.setdefault(
+            r["category"], {"name": r["category"], "cells": {}, "total": 0}
+        )
+        e["cells"][r["year"]] = r["total_cents"]
+        e["total"] += r["total_cents"]
+    return years, sorted(by_cat.values(), key=lambda e: e["total"])
+
+
+def _period_filter(year: int | None, month: int | None) -> tuple[str, list[str]]:
+    """SQL fragment + params restricting booking_date to a year/month."""
+    if year and month:
+        return _DATE_LIKE, [f"{year:04d}-{month:02d}-%"]
+    if year:
+        return _DATE_LIKE, [f"{year:04d}-%"]
+    return "", []
 
 
 class Store:
@@ -73,6 +107,47 @@ class Store:
         self.conn.commit()
         return inserted, len(txs) - inserted
 
+    def record_balances(
+        self, balances: list[tuple[str, str, int, str, str]]
+    ) -> None:
+        """Store balance snapshots: (account, iso_date, cents, currency, source)."""
+        self.conn.executemany(
+            """INSERT OR REPLACE INTO balances
+               (account, snapshot_date, balance_cents, currency, source)
+               VALUES (?, ?, ?, ?, ?)""",
+            balances,
+        )
+        self.conn.commit()
+
+    def latest_balances(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            """SELECT account, snapshot_date, balance_cents, currency
+               FROM balances b
+               WHERE snapshot_date = (
+                   SELECT MAX(snapshot_date) FROM balances WHERE account = b.account
+               )
+               ORDER BY balance_cents DESC"""
+        ).fetchall()
+
+    def adopt_categories(self, txs: list[Transaction]) -> int:
+        """Fallback categorization from a bank/app CSV.
+
+        Only fills rows that are still NULL — YAML rules always win.
+        Returns the number of rows updated.
+        """
+        updated = 0
+        for t in assign_seq(txs):
+            if not t.category:
+                continue
+            cur = self.conn.execute(
+                "UPDATE transactions SET category = ? "
+                "WHERE hash = ? AND category IS NULL",
+                (t.category, t.tx_hash()),
+            )
+            updated += cur.rowcount
+        self.conn.commit()
+        return updated
+
     def set_category(self, hashes: list[str], category: str | None) -> int:
         if not hashes:
             return 0
@@ -100,12 +175,9 @@ class Store:
         if account:
             sql += " AND account = ?"
             params.append(account)
-        if year and month:
-            sql += " AND booking_date LIKE ?"
-            params.append(f"{year:04d}-{month:02d}-%")
-        elif year:
-            sql += " AND booking_date LIKE ?"
-            params.append(f"{year:04d}-%")
+        frag, frag_params = _period_filter(year, month)
+        sql += frag
+        params.extend(frag_params)
         if category:
             sql += " AND category = ?"
             params.append(category)
@@ -126,14 +198,65 @@ class Store:
                         COUNT(*) AS n
                  FROM transactions WHERE 1=1"""
         params: list = []
-        if year and month:
-            sql += " AND booking_date LIKE ?"
-            params.append(f"{year:04d}-{month:02d}-%")
-        elif year:
-            sql += " AND booking_date LIKE ?"
-            params.append(f"{year:04d}-%")
+        frag, frag_params = _period_filter(year, month)
+        sql += frag
+        params.extend(frag_params)
         sql += " GROUP BY category, currency ORDER BY total_cents"
         return self.conn.execute(sql, params).fetchall()
+
+    def balances_at(self, stichtag: str) -> list[dict]:
+        """Per-account balance at a historic date (ISO), computed backwards:
+        latest snapshot minus all bookings after the Stichtag.
+
+        status: 'ok'             — data reaches back past the Stichtag
+                'nicht_existent' — account demonstrably opened later
+                                   (tx sum equals today's balance)
+                'unbekannt'      — history starts after the Stichtag but
+                                   doesn't cover the account's full life
+        """
+        out: list[dict] = []
+        for b in self.latest_balances():
+            acc = b["account"]
+            later = self.conn.execute(
+                """SELECT COALESCE(SUM(amount_cents), 0) AS s FROM transactions
+                   WHERE account = ? AND booking_date > ? AND booking_date <= ?""",
+                (acc, stichtag, b["snapshot_date"]),
+            ).fetchone()["s"]
+            ever = self.conn.execute(
+                """SELECT MIN(booking_date) AS first_tx,
+                          COALESCE(SUM(amount_cents), 0) AS total
+                   FROM transactions WHERE account = ?""",
+                (acc,),
+            ).fetchone()
+            if ever["first_tx"] and ever["first_tx"] <= stichtag:
+                status, cents = "ok", b["balance_cents"] - later
+            elif ever["total"] == b["balance_cents"]:
+                status, cents = "nicht_existent", 0
+            else:
+                status, cents = "unbekannt", None
+            out.append(
+                {
+                    "account": acc,
+                    "status": status,
+                    "balance_cents": cents,
+                    "currency": b["currency"],
+                    "snapshot_date": b["snapshot_date"],
+                    "data_from": ever["first_tx"],
+                }
+            )
+        return out
+
+    def summary_by_year(self) -> list[sqlite3.Row]:
+        """Category sums per calendar year (for pivot views)."""
+        return self.conn.execute(
+            """SELECT COALESCE(category, '(unkategorisiert)') AS category,
+                      substr(booking_date,1,4) AS year,
+                      SUM(amount_cents) AS total_cents,
+                      COUNT(*) AS n
+               FROM transactions
+               GROUP BY category, year
+               ORDER BY category, year"""
+        ).fetchall()
 
     def accounts_overview(self) -> list[sqlite3.Row]:
         return self.conn.execute(

@@ -25,6 +25,11 @@ GENERIC_SAMPLE = """date,amount,counterparty,purpose,currency
 2026-06-05,-10.50,Coffee Corner,Cappuccino,EUR
 """
 
+OUTBANK_SAMPLE = '''#;Konto;Datum;Valuta;Betrag;Währung;Name;Nummer;Bank;Zweck;Hauptkategorie;Kategorie;Kategoriepfad;Tags;Notiz;Abweichender Zahlungsempfänger;Buchungsschlüssel;Buchungstext;Art der Zahlung;SEPA Referenz;Kundenreferenz;Mandatsreferenz;Gläubiger ID
+1;DE00610500000000000000;03.07.2026;03.07.2026;-60,00;EUR;"Telefonica Germany GmbH + Co. OHG";"DE00700400410000000000";"COBADEFF";"Kd-Nr.: 123, Ihr Ratenplan";"Lebenshaltung";"Handy & Internet";"Lebenshaltung / Handy & Internet";;;;"105";"FOLGELASTSCHRIFT";;"REF";;"MANDAT";"DE00XX"
+2;DE00610500000000000000;01.07.2026;01.07.2026;1.500,00;EUR;"Max Muster";"DE00120300000000000000";"BYLADEM1";"Ausgleich";"Einkommen";"Sonstiges";"Einkommen / Sonstiges";;;;"117";"GUTSCHRIFT";;;;;
+'''
+
 
 def test_parse_german_decimal():
     assert parse_german_decimal("-1.234,56 €") == Decimal("-1234.56")
@@ -70,6 +75,20 @@ def test_generic_import(tmp_path):
     assert len(txs) == 1
     assert txs[0].amount == Decimal("-10.50")
     assert txs[0].counterparty == "Coffee Corner"
+
+
+def test_outbank_import(tmp_path):
+    f = tmp_path / "outbank.csv"
+    f.write_text(OUTBANK_SAMPLE, encoding="utf-8")
+    txs = import_csv(f, "outbank", account="ksk-giro")
+    assert len(txs) == 2
+    tel, incoming = txs[0], txs[1]
+    assert tel.booking_date == date(2026, 7, 3)
+    assert tel.amount == Decimal("-60.00")
+    assert tel.counterparty == "Telefonica Germany GmbH + Co. OHG"
+    assert tel.booking_type == "FOLGELASTSCHRIFT"
+    assert incoming.amount == Decimal("1500.00")
+    assert incoming.purpose == "Ausgleich"
 
 
 def test_unknown_profile(tmp_path):

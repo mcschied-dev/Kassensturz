@@ -1,0 +1,69 @@
+% kassensturz — Vermögensübersicht zum Stichtag (((d.stichtag_de|tex)))
+\documentclass[10pt,parskip=half-]{scrartcl}
+
+\usepackage{fontspec}
+\usepackage{booktabs}
+\usepackage{ragged2e}
+\usepackage[ngerman]{babel}
+\usepackage[
+  a4paper,
+  left   = 25mm,
+  right  = 35mm,
+  top    = 25mm,
+  bottom = 25mm,
+]{geometry}
+
+\setmainfont{Work Sans}[
+  UprightFeatures = {RawFeature={axis={wght=400}}},
+  BoldFeatures    = {RawFeature={axis={wght=500}}},
+  AutoFakeSlant   = 0.18,
+  Numbers         = {Monospaced,Lining},
+  Ligatures       = TeX,
+]
+\renewcommand{\familydefault}{\sfdefault}
+
+\setkomafont{section}{\normalsize\bfseries}
+\pagestyle{plain}
+\setlength{\parindent}{0pt}
+\RaggedRight
+
+\begin{document}
+
+{\LARGE\bfseries Vermögensübersicht}\\[2mm]
+{\large Stichtag (((d.stichtag_de|tex)))((* if d.label *)) — (((d.label|tex)))((* endif *))}\\[1mm]
+erstellt am (((d.created|tex)))
+
+\vspace{8mm}
+
+\section*{Kontostände zum Stichtag}
+\begin{tabular}{@{}l r l@{}}
+\toprule
+Konto & Saldo & Datenbasis \\
+\midrule
+((* for b in d.rows *))
+(((b.account|tex))) &
+((* if b.status == 'ok' *))(((b.balance_cents|eur(b.currency))))((* elif b.status == 'nicht_existent' *))— & Konto bestand noch nicht((* else *))unbekannt & Umsätze erst ab (((b.data_from|tex)))((* endif *))
+((* if b.status == 'ok' *))& Umsätze ab (((b.data_from|tex)))((* endif *)) \\
+((* endfor *))
+\midrule
+\textbf{Gesamt (EUR)} & \textbf{(((d.total_cents|eur)))} & \\
+\bottomrule
+\end{tabular}
+
+\vspace{6mm}
+
+{\footnotesize
+\textbf{Methodik:} Die Salden zum Stichtag wurden rückgerechnet aus dem
+jeweils letzten bekannten Kontostand abzüglich aller nach dem Stichtag
+gebuchten Umsätze. Voraussetzung ist eine lückenlose Umsatzhistorie
+zwischen Stichtag und Kontostandsdatum; die Spalte Datenbasis nennt den
+Beginn der vorliegenden Historie je Konto.
+Referenz-Kontostände vom (((d.snapshot_date|tex))).
+Konten mit dem Vermerk „Konto bestand noch nicht`` wurden nachweislich
+erst nach dem Stichtag eröffnet (Summe aller Umsätze seit Eröffnung
+entspricht dem heutigen Saldo).}
+
+\vfill
+{\footnotesize kassensturz — lokale Auswertung, keine Daten verlassen diesen Rechner.}
+
+\end{document}

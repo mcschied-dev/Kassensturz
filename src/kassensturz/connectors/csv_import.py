@@ -54,6 +54,9 @@ class CsvProfile:
     value_date_col: str | None = None
     booking_type_col: str | None = None
     currency_col: str | None = None
+    # bank/app's own category column — used by `adopt-categories` as a
+    # fallback for rows the YAML rules leave uncategorized
+    category_col: str | None = None
     currency: str = "EUR"
     delimiter: str = ";"
     encodings: tuple[str, ...] = ("utf-8-sig", "cp1252")
@@ -84,6 +87,20 @@ PROFILES: dict[str, CsvProfile] = {
         counterparty_col="Beguenstigter/Zahlungspflichtiger",
         booking_type_col="Buchungstext",
         currency_col="Waehrung",
+        category_col="Kategorie",  # only present in the categorized export
+    ),
+    # Outbank app export (multi-year history, all German banks)
+    "outbank": CsvProfile(
+        name="outbank",
+        date_col="Datum",
+        value_date_col="Valuta",
+        amount_col="Betrag",
+        purpose_col="Zweck",
+        counterparty_col="Name",
+        booking_type_col="Buchungstext",
+        currency_col="Währung",
+        category_col="Kategorie",
+        encodings=("utf-8-sig",),
     ),
     # Minimal generic format: date,amount,counterparty,purpose[,currency]
     "generic": CsvProfile(
@@ -152,6 +169,7 @@ def _row_to_transaction(
         purpose=row.get(profile.purpose_col, ""),
         value_date=value_date,
         booking_type=row.get(profile.booking_type_col or "", ""),
+        category=row.get(profile.category_col or "") or None,
         source=f"csv:{profile.name}",
     )
 
