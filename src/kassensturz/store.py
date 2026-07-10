@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS balances (
 
 _DATE_LIKE = " AND booking_date LIKE ?"
 
+# "Lupen"-Konten: itemisierte Sicht (z. B. PayPal nach Händler), aber deren
+# Geld fließt bereits über die Bankkonten → aus Cashflow-Summen ausklammern,
+# sonst Doppelzählung. In `list`/Suche bleiben sie sichtbar.
+DETAIL_ACCOUNTS = ("paypal",)
+_NOT_DETAIL = " AND account NOT IN ({})".format(
+    ",".join("?" * len(DETAIL_ACCOUNTS))
+)
+
 
 def build_year_matrix(rows) -> tuple[list[str], list[dict]]:
     """Pivot summary_by_year rows → (years, [{name, cells{year:cents}, total}])."""
@@ -197,7 +205,8 @@ class Store:
                         SUM(amount_cents) AS total_cents,
                         COUNT(*) AS n
                  FROM transactions WHERE 1=1"""
-        params: list = []
+        params: list = list(DETAIL_ACCOUNTS)
+        sql += _NOT_DETAIL
         frag, frag_params = _period_filter(year, month)
         sql += frag
         params.extend(frag_params)
@@ -254,8 +263,10 @@ class Store:
                       SUM(amount_cents) AS total_cents,
                       COUNT(*) AS n
                FROM transactions
+               WHERE 1=1""" + _NOT_DETAIL + """
                GROUP BY category, year
-               ORDER BY category, year"""
+               ORDER BY category, year""",
+            DETAIL_ACCOUNTS,
         ).fetchall()
 
     def accounts_overview(self) -> list[sqlite3.Row]:

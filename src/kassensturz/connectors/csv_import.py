@@ -57,6 +57,12 @@ class CsvProfile:
     # bank/app's own category column — used by `adopt-categories` as a
     # fallback for rows the YAML rules leave uncategorized
     category_col: str | None = None
+    # rows whose booking_type is in this set are dropped (PayPal: internal
+    # funding legs, authorizations, FX conversions → avoid double counting)
+    exclude_types: tuple[str, ...] = ()
+    # rows whose counterparty contains any of these substrings are dropped
+    # (PayPal: "PayPal (Europe)" = interne Einzugs-/Settlement-Buchungen)
+    exclude_counterparty_contains: tuple[str, ...] = ()
     currency: str = "EUR"
     delimiter: str = ";"
     encodings: tuple[str, ...] = ("utf-8-sig", "cp1252")
@@ -88,6 +94,34 @@ PROFILES: dict[str, CsvProfile] = {
         booking_type_col="Buchungstext",
         currency_col="Waehrung",
         category_col="Kategorie",  # only present in the categorized export
+    ),
+    # PayPal Aktivitäten-Export (deutsch). ENTWURF — an echtem Export
+    # verifizieren: Spaltennamen/Trennzeichen variieren je PayPal-Version.
+    # "Brutto" = Transaktionsbetrag; nur Zahlungen importieren, Bank-
+    # Aufbuchungen ("Allgemeine Aufbuchung") sind Gegenbuchung zur
+    # SEPA-Abbuchung → sonst Doppelzählung.
+    "paypal": CsvProfile(
+        name="paypal",
+        date_col="Datum",
+        amount_col="Brutto",
+        purpose_col="Artikelbezeichnung",
+        counterparty_col="Name",
+        currency_col="Währung",
+        booking_type_col="Typ",
+        delimiter=",",
+        encodings=("utf-8-sig", "cp1252"),
+        # nur echte Zahlungen/Rückzahlungen behalten; interne Legs raus
+        exclude_types=(
+            "Allgemeine Autorisierung",
+            "Stornierung der Autorisierung",
+            "Einbehaltung für offene Autorisierung",
+            "Rückbuchung allgemeiner Einbehaltung",
+            "Allgemeine Gutschrift auf Kreditkarte",
+            "Allgemeine Abbuchung von Kreditkarte",
+            "Bankgutschrift auf PayPal-Konto",
+            "Allgemeine Währungsumrechnung",
+        ),
+        exclude_counterparty_contains=("PayPal (Europe)",),
     ),
     # Outbank app export (multi-year history, all German banks)
     "outbank": CsvProfile(
@@ -139,6 +173,13 @@ def _find_header(lines: list[str], profile: CsvProfile) -> int:
     )
 
 
+def _counterparty(row: dict[str, str], profile: CsvProfile, amount: Decimal) -> str:
+    if profile.counterparty_by_sign:
+        neg_col, pos_col = profile.counterparty_by_sign
+        return row.get(neg_col if amount < 0 else pos_col, "")
+    return row.get(profile.counterparty_col or "", "")
+
+
 def _row_to_transaction(
     row: dict[str, str], profile: CsvProfile, account: str
 ) -> Transaction | None:
@@ -146,13 +187,14 @@ def _row_to_transaction(
     raw_date = row.get(profile.date_col, "")
     if not raw_amount or not raw_date:
         return None  # trailing/summary lines
+    booking_type = row.get(profile.booking_type_col or "", "").strip()
+    if booking_type in profile.exclude_types:
+        return None  # internal/funding legs (PayPal double entry)
     amount = parse_german_decimal(raw_amount)
-
-    if profile.counterparty_by_sign:
-        neg_col, pos_col = profile.counterparty_by_sign
-        counterparty = row.get(neg_col if amount < 0 else pos_col, "")
-    else:
-        counterparty = row.get(profile.counterparty_col or "", "")
+    counterparty = _counterparty(row, profile, amount)
+    cp_lower = counterparty.lower()
+    if any(s.lower() in cp_lower for s in profile.exclude_counterparty_contains):
+        return None  # internal PayPal settlement, not a merchant payment
 
     value_date = None
     if profile.value_date_col and row.get(profile.value_date_col):
@@ -168,7 +210,7 @@ def _row_to_transaction(
         counterparty=counterparty,
         purpose=row.get(profile.purpose_col, ""),
         value_date=value_date,
-        booking_type=row.get(profile.booking_type_col or "", ""),
+        booking_type=booking_type,
         category=row.get(profile.category_col or "") or None,
         source=f"csv:{profile.name}",
     )

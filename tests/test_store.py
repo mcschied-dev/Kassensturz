@@ -138,6 +138,21 @@ def test_balances_at_three_statuses():
     assert result["luecke"]["balance_cents"] is None
 
 
+def test_detail_accounts_excluded_from_summary_not_from_query():
+    store = Store(":memory:")
+    store.add(
+        [
+            tx(account="dkb", amount=Decimal("-10.00"), category="Shopping"),
+            tx(account="paypal", amount=Decimal("-10.00"), category="Shopping"),
+        ]
+    )
+    # summary (cashflow) excludes the paypal detail account
+    shopping = [r for r in store.summary() if r["category"] == "Shopping"]
+    assert shopping[0]["total_cents"] == -1000  # only the dkb row
+    # but the transaction is still queryable/searchable
+    assert len(store.query(account="paypal")) == 1
+
+
 def test_fmt_eur():
     assert fmt_eur(-123456) == "-1.234,56 €"
     assert fmt_eur(350000) == "3.500,00 €"
