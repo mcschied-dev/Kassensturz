@@ -132,25 +132,31 @@ def _resolve_tan(client: FinTS3PinTanClient, result, tan_callback: TanCallback):
     return result
 
 
-def _bootstrap(client: FinTS3PinTanClient) -> None:
+def _bootstrap(client: FinTS3PinTanClient, conn: FintsConnection) -> None:
     """Pick TAN mechanism + medium without the interactive CLI helper.
 
     python-fints' minimal_interactive_cli_bootstrap chokes on Sparkasse
     decoupled pushTAN: fetching the TAN-medium name (HKTAB) expects a
     challenge the bank never issues for decoupled ("3905 keine Challenge
-    erzeugt" → 9010). Here we set the (usually single) mechanism and only
-    fetch a medium when the mechanism truly requires one, tolerating a
-    rejected HKTAB.
+    erzeugt" → 9010). Here we set the mechanism and, when required, the
+    medium name — preferring an explicit config value (Deutsche Bank
+    BestSign refuses the HKTAB query, so the name must come from config).
     """
     from fints.formals import DescriptionRequired
 
     client.fetch_tan_mechanisms()
     mechanisms = client.get_tan_mechanisms()
-    if not client.get_current_tan_mechanism() and mechanisms:
+    if conn.tan_mechanism and conn.tan_mechanism in mechanisms:
+        client.set_tan_mechanism(conn.tan_mechanism)
+    elif not client.get_current_tan_mechanism() and mechanisms:
         client.set_tan_mechanism(next(iter(mechanisms)))
 
     mechanism = client.get_current_tan_mechanism()
     if getattr(mechanism, "description_required", None) != DescriptionRequired.MUST:
+        return
+    # Explicit config wins — the value python-fints stores is just the name.
+    if conn.tan_medium:
+        client.selected_tan_medium = conn.tan_medium
         return
     try:
         _usage, media = client.get_tan_media()
@@ -215,7 +221,7 @@ def sync_connection(
     )
     if from_data is None:
         # First contact: fetch BPD, pick TAN mechanism (decoupled-safe).
-        _bootstrap(client)
+        _bootstrap(client, conn)
 
     txs: list[Transaction] = []
     skipped: list[str] = []

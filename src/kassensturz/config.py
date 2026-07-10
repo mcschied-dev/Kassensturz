@@ -40,6 +40,12 @@ class FintsConnection:
     # decoupled pushTAN (3905 "keine Challenge" → 9010). Skipping it lets
     # python-fints fetch the BPD via a plain dialog init instead.
     skip_system_id_sync: bool = False
+    # Some banks (Deutsche Bank BestSign) demand a TAN-medium name that the
+    # HKTAB media query won't reveal → set it explicitly (device name from
+    # the banking portal). tan_mechanism forces a security function (e.g.
+    # "921" push instead of "920").
+    tan_medium: str | None = None
+    tan_mechanism: str | None = None
 
     def label_for(self, iban: str) -> str | None:
         return _label_for(self.name, self.accounts, iban)
@@ -120,6 +126,10 @@ def load_config(path: str | Path | None = None) -> Config:
             product_id=entry.get("product_id"),
             accounts=dict(entry.get("accounts") or {}),
             skip_system_id_sync=bool(entry.get("skip_system_id_sync", False)),
+            tan_medium=entry.get("tan_medium"),
+            tan_mechanism=(
+                str(entry["tan_mechanism"]) if entry.get("tan_mechanism") else None
+            ),
         )
         for entry in (data.get("fints") or [])
     ]
