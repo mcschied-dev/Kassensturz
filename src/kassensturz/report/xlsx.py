@@ -48,6 +48,26 @@ def _q(store: Store, sql: str, params: tuple = ()) -> list:
     return store.conn.execute(sql, params).fetchall()
 
 
+def _income_expense(store: Store, year: str, month: str | None = None) -> tuple[int, int]:
+    """Einnahmen/Ausgaben nach KATEGORIE-NETTO (wie der LaTeX-Report):
+    Retouren mindern die Ausgaben ihrer Kategorie, statt als "Einkommen"
+    zu erscheinen — eine zurückgeschickte Hose ist kein Gehalt."""
+    frag, params = "", [year]
+    if month:
+        frag = " AND substr(booking_date,6,2)=?"
+        params.append(month)
+    rows = _q(
+        store,
+        "SELECT COALESCE(category,'(unkategorisiert)') c, SUM(amount_cents) s "
+        f"FROM transactions WHERE substr(booking_date,1,4)=? {frag} {_BASE} "
+        "GROUP BY c",
+        tuple(params),
+    )
+    inc = sum(r["s"] for r in rows if r["s"] > 0)
+    exp = sum(r["s"] for r in rows if r["s"] < 0)
+    return inc, exp
+
+
 def _years(store: Store, first: str = "2022") -> list[str]:
     return [
         r["y"]
@@ -132,13 +152,7 @@ def _dashboard(store: Store, ws, years: list[str]) -> None:
     _table_header(ws, row, 2,
                   ["Jahr", "Einnahmen", "Ausgaben", "Saldo", "Sondereffekte"])
     for y in years:
-        inc, exp = _q(
-            store,
-            "SELECT COALESCE(SUM(CASE WHEN amount_cents>0 THEN amount_cents END),0),"
-            "       COALESCE(SUM(CASE WHEN amount_cents<0 THEN amount_cents END),0) "
-            f"FROM transactions WHERE substr(booking_date,1,4)=? {_BASE}",
-            (y,),
-        )[0]
+        inc, exp = _income_expense(store, y)
         special = _q(
             store,
             "SELECT COALESCE(SUM(amount_cents),0) FROM transactions "
@@ -195,14 +209,12 @@ def _year_sheet(store: Store, ws, year: str) -> None:
 
     ws.cell(row=2, column=2, value=f"Jahresbericht {year}").font = F_TITLE
 
-    inc, exp, n = _q(
+    inc, exp = _income_expense(store, year)
+    n = _q(
         store,
-        "SELECT COALESCE(SUM(CASE WHEN amount_cents>0 THEN amount_cents END),0),"
-        "       COALESCE(SUM(CASE WHEN amount_cents<0 THEN amount_cents END),0),"
-        "       COUNT(*) "
-        f"FROM transactions WHERE substr(booking_date,1,4)=? {_BASE}",
+        f"SELECT COUNT(*) FROM transactions WHERE substr(booking_date,1,4)=? {_BASE}",
         (year,),
-    )[0]
+    )[0][0]
     special = _q(
         store,
         "SELECT COALESCE(SUM(amount_cents),0) FROM transactions "
@@ -222,20 +234,8 @@ def _year_sheet(store: Store, ws, year: str) -> None:
     row += 1
     head = row
     _table_header(ws, row, 2, ["Monat", "Einnahmen", "Ausgaben", "Saldo"])
-    monthly = {
-        r["m"]: (r["i"] or 0, r["e"] or 0)
-        for r in _q(
-            store,
-            "SELECT substr(booking_date,6,2) m,"
-            "       SUM(CASE WHEN amount_cents>0 THEN amount_cents END) i,"
-            "       SUM(CASE WHEN amount_cents<0 THEN amount_cents END) e "
-            f"FROM transactions WHERE substr(booking_date,1,4)=? {_BASE} "
-            "GROUP BY m",
-            (year,),
-        )
-    }
     for m in range(1, 13):
-        i, e = monthly.get(f"{m:02d}", (0, 0))
+        i, e = _income_expense(store, year, f"{m:02d}")
         row += 1
         _cell(ws, row, 2, MONTHS[m - 1])
         _cell(ws, row, 3, i / 100, EUR_FMT)

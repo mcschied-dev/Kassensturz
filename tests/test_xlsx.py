@@ -29,6 +29,9 @@ def test_workbook_sheets_and_consolidation(tmp_path):
         [
             tx(booking_date=date(2024, 3, 1), amount=Decimal("-100.00"),
                category="Shopping"),
+            # Retoure: mindert die Shopping-Ausgaben, ist KEIN Einkommen
+            tx(booking_date=date(2024, 3, 9), amount=Decimal("30.00"),
+               category="Shopping", purpose="retoure"),
             tx(booking_date=date(2024, 4, 1), amount=Decimal("3000.00"),
                category="Gehalt", purpose="lohn"),
             # neutral & Sondereffekt dürfen NICHT in Einnahmen/Ausgaben zählen
@@ -47,8 +50,8 @@ def test_workbook_sheets_and_consolidation(tmp_path):
     ws = wb["2024"]
     kpis = {ws.cell(row=4, column=2 + i * 2).value:
             ws.cell(row=5, column=2 + i * 2).value for i in range(5)}
-    assert kpis["Einnahmen"] == 3000.0
-    assert kpis["Ausgaben"] == -100.0          # ohne neutrale Abrechnung
+    assert kpis["Einnahmen"] == 3000.0         # Retoure zählt NICHT als Einnahme
+    assert kpis["Ausgaben"] == -70.0           # Shopping netto, ohne Neutrale
     assert kpis["Sondereffekte"] == 9999.0     # separat ausgewiesen
     # unkategorisierte Zeilen zählen mit (kein NULL-Trap)
     ws25 = wb["2025"]
