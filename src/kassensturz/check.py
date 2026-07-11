@@ -194,11 +194,35 @@ def check_monthly_gaps(store: Store, min_rows: int = 100) -> list[Finding]:
             month = f"{y:04d}-{m:02d}"
             if month <= acc["last"] and month not in present:
                 missing.append(month)
+        # Kalendermonate können trotz Loch besetzt sein (je 1 Zeile am
+        # Rand) — deshalb zusätzlich der größte Tagesabstand zwischen
+        # aufeinanderfolgenden Buchungen der letzten ~13 Monate.
+        gap_row = store.conn.execute(
+            """SELECT MAX(julianday(booking_date) - julianday(prev)) AS g,
+                      COUNT(*) AS n
+               FROM (SELECT booking_date,
+                            LAG(booking_date) OVER (ORDER BY booking_date) AS prev
+                     FROM (SELECT DISTINCT booking_date FROM transactions
+                           WHERE account = ?
+                             AND booking_date >= date(
+                                   (SELECT MAX(booking_date) FROM transactions
+                                    WHERE account = ?), '-400 days')))""",
+            (acc["account"], acc["account"]),
+        ).fetchone()
+        # nur bei dichter Nutzung aussagekräftig — eine selten genutzte
+        # Partnerkarte hat legitime Wochen ohne Umsatz
+        max_gap = int(gap_row["g"] or 0) if gap_row["n"] >= 60 else 0
         if missing:
             out.append(
                 Finding("warn", "lücken",
                         f"{acc['account']}: keine Buchungen in {', '.join(missing)} "
                         f"— Export-/Sync-Loch prüfen")
+            )
+        elif max_gap > 28:
+            out.append(
+                Finding("warn", "lücken",
+                        f"{acc['account']}: {max_gap} Tage ohne Buchung im letzten "
+                        f"Jahr — fehlende Abrechnung/Export prüfen")
             )
         else:
             out.append(
