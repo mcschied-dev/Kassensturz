@@ -140,6 +140,23 @@ PROFILES: dict[str, CsvProfile] = {
         encodings=("utf-8-sig",),
         exclude_counterparty_contains=("Lastschrift", "Paypal", "PayPal"),
     ),
+    # Partnerkarte (Zusatzkarte) via Outbank: wie "mm", ABER die
+    # "Paypal *"-Funding-Legs bleiben DRIN — das PayPal-Konto des
+    # Partners liegt nicht in der DB, die Legs sind die einzige Spur
+    # dieser Ausgaben. Nur der Monatsausgleich (Lastschrift) fliegt raus.
+    "mm-partner": CsvProfile(
+        name="mm-partner",
+        date_col="Datum",
+        value_date_col="Valuta",
+        amount_col="Betrag",
+        purpose_col="Zweck",
+        counterparty_col="Name",
+        booking_type_col="Buchungstext",
+        currency_col="Währung",
+        category_col="Kategorie",
+        encodings=("utf-8-sig",),
+        exclude_counterparty_contains=("Lastschrift",),
+    ),
     # Miles & More Gold Credit Card, Export aus dem DB-Kartenportal
     # (banking.miles-and-more-kreditkarte.com). Mehrere Abrechnungs-
     # Sektionen pro Datei; Händler steht im Verwendungszweck (dient auch

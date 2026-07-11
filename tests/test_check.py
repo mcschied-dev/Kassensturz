@@ -100,6 +100,63 @@ def test_uncategorized_income():
     assert levels(check_uncategorized_income(store), "einnahmen") == ["warn"]
 
 
+def test_spesen_matching_and_grace():
+    from kassensturz.check import check_spesen, match_spesen
+
+    store = Store(":memory:")
+    store.add(
+        [
+            # exakt erstatteter Beleg
+            tx(
+                account="mm-karte",
+                booking_date=date(2026, 3, 2),
+                amount=Decimal("-220.00"),
+                counterparty="Stayery Bochum",
+            ),
+            tx(
+                account="dkb",
+                booking_date=date(2026, 3, 10),
+                amount=Decimal("220.00"),
+                counterparty="emproof GmbH",
+                purpose="RNr. 110-26030056",
+                category="Spesen-Erstattung (Emproof)",
+            ),
+            # vergessener Beleg, älter als Kulanzfrist
+            tx(
+                account="mm-karte",
+                booking_date=date(2026, 4, 1),
+                amount=Decimal("-333.00"),
+                counterparty="Mercure Bochum City",
+            ),
+            # frischer Beleg — noch in der Kulanzfrist, keine Warnung
+            tx(
+                account="mm-karte",
+                booking_date=date(2026, 6, 28),
+                amount=Decimal("-99.00"),
+                counterparty="DB Vertrieb GmbH",
+            ),
+        ]
+    )
+    result = match_spesen(store, today=date(2026, 7, 1))
+    assert result["unmatched_total"] == 33300  # nur der Mercure-Beleg
+    assert result["surplus"] == 0
+    assert levels(check_spesen(store, today=date(2026, 7, 1)), "spesen") == ["warn"]
+    # Sammelreport deckt den offenen Betrag → ok
+    store.add(
+        [
+            tx(
+                account="dkb",
+                booking_date=date(2026, 5, 30),
+                amount=Decimal("400.00"),
+                counterparty="emproof GmbH",
+                purpose="Travel Expenses sequenz-id 42",
+                category="Spesen-Erstattung (Emproof)",
+            )
+        ]
+    )
+    assert levels(check_spesen(store, today=date(2026, 7, 1)), "spesen") == ["ok"]
+
+
 def test_monthly_gaps():
     store = Store(":memory:")
     # 100+ bookings in Jan..Mar with April missing, May present → warn

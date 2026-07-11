@@ -208,6 +208,120 @@ def check_monthly_gaps(store: Store, min_rows: int = 100) -> list[Finding]:
     return out
 
 
+# --- Spesen-Erstattung (Emproof/Circula) -------------------------------------
+#
+# Marc reicht Reisebelege in Circula ein; Emproof erstattet auf die DKB —
+# belegweise ("RNr. … RDat. …", Betrag == Beleg) oder als Sammelreport
+# ("Travel Expenses … sequenz-id …"). Der Check matcht Reise-Ausgaben gegen
+# Erstattungen und meldet vergessene Einreichungen.
+
+SPESEN_SINCE = "2026-01-01"  # Emproof-Arbeitsvertrag ab 01.01.2026
+
+# was als Reise-/Spesenkandidat gilt (Substring, lowercase, gegen
+# counterparty UND purpose geprüft — Kartenzeilen tragen die Stadt im Text)
+SPESEN_PATTERNS = (
+    "db vertrieb", "db fernverkehr", "deutsche bahn", "vrr ",
+    "stayery", "hotel", "mercure", "motel one", "8710 mo ",
+    "kantine.wtf", "lufthan", "flughafen", "rentalcars",
+    "bochum", "bremen",
+)
+
+# so lange darf eine Ausgabe unerstattet bleiben, bevor gewarnt wird
+# (Einreichung + Monatsende-Zahllauf)
+SPESEN_GRACE_DAYS = 45
+
+# Bagatellen nicht anmahnen
+SPESEN_MIN_CENTS = 1_000
+
+
+def _spesen_candidates(store: Store) -> list[dict]:
+    like = " OR ".join(
+        "lower(counterparty) LIKE ? OR lower(purpose) LIKE ?"
+        for _ in SPESEN_PATTERNS
+    )
+    params = [f"%{p}%" for p in SPESEN_PATTERNS for _ in range(2)]
+    return [
+        dict(r)
+        for r in store.conn.execute(
+            f"""SELECT booking_date, account, counterparty, purpose, amount_cents
+                FROM transactions
+                WHERE amount_cents < 0 AND booking_date >= ?
+                  AND account != 'mm-birgit'
+                  AND COALESCE(category,'') NOT IN
+                      ('Umbuchung','Kreditkarten-Abrechnung',
+                       'PayPal-Funding (neutral)','Bankgebühren')
+                  AND ({like})
+                ORDER BY booking_date""",
+            [SPESEN_SINCE, *params],
+        )
+    ]
+
+
+def _spesen_reimbursements(store: Store) -> list[dict]:
+    return [
+        dict(r)
+        for r in store.conn.execute(
+            """SELECT booking_date, purpose, amount_cents
+               FROM transactions
+               WHERE category = 'Spesen-Erstattung (Emproof)' AND amount_cents > 0
+               ORDER BY booking_date"""
+        )
+    ]
+
+
+def match_spesen(store: Store, today: date | None = None) -> dict:
+    """Greedy Beleg-Matching: gleicher Betrag, Erstattung 0–90 Tage nach
+    der Ausgabe. Sammelreports bleiben als Erstattungs-Überhang stehen und
+    decken rechnerisch die ältesten unmatchten Ausgaben."""
+    today = today or date.today()
+    expenses = _spesen_candidates(store)
+    reimbs = _spesen_reimbursements(store)
+    open_reimbs = list(reimbs)
+    for e in expenses:
+        for r in open_reimbs:
+            gap = (date.fromisoformat(r["booking_date"])
+                   - date.fromisoformat(e["booking_date"])).days
+            if r["amount_cents"] == -e["amount_cents"] and 0 <= gap <= 90:
+                e["matched"] = r["booking_date"]
+                open_reimbs.remove(r)
+                break
+        else:
+            e["matched"] = None
+    unmatched = [
+        e for e in expenses
+        if e["matched"] is None
+        and -e["amount_cents"] >= SPESEN_MIN_CENTS
+        and (today - date.fromisoformat(e["booking_date"])).days > SPESEN_GRACE_DAYS
+    ]
+    surplus = sum(r["amount_cents"] for r in open_reimbs)  # Sammelreports etc.
+    return {
+        "expenses": expenses,
+        "reimbursed_total": sum(r["amount_cents"] for r in reimbs),
+        "unmatched": unmatched,
+        "unmatched_total": -sum(e["amount_cents"] for e in unmatched),
+        "surplus": surplus,
+    }
+
+
+def check_spesen(store: Store, today: date | None = None) -> list[Finding]:
+    result = match_spesen(store, today=today)
+    if not result["expenses"]:
+        return []
+    gap = result["unmatched_total"] - result["surplus"]
+    if gap > 0:
+        return [Finding(
+            "warn", "spesen",
+            f"{len(result['unmatched'])} Reisebelege ohne passende Emproof-"
+            f"Erstattung ({result['unmatched_total']/100:.2f} €; nach Abzug des "
+            f"Sammelreport-Überhangs fehlen {gap/100:.2f} €) — `kassensturz "
+            f"spesen` zeigt die Belege")]
+    return [Finding(
+        "ok", "spesen",
+        f"Reisespesen seit {SPESEN_SINCE} gedeckt (erstattet "
+        f"{result['reimbursed_total']/100:.2f} €, Überhang aus Sammelreports "
+        f"{result['surplus']/100:.2f} € ≥ offene {result['unmatched_total']/100:.2f} €)")]
+
+
 def run_all(store: Store, today: date | None = None) -> list[Finding]:
     return [
         *check_balance_reconciliation(store),
@@ -215,4 +329,5 @@ def run_all(store: Store, today: date | None = None) -> list[Finding]:
         *check_transfer_residual(store),
         *check_uncategorized_income(store),
         *check_monthly_gaps(store),
+        *check_spesen(store, today=today),
     ]

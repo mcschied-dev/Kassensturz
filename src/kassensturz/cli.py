@@ -363,6 +363,44 @@ def check(
 
 
 @app.command()
+def spesen(
+    db: Path = DbOption,
+) -> None:
+    """Reisespesen vs. Emproof-Erstattungen (belegweise gematcht, pro Monat)."""
+    from rich.table import Table
+
+    from .check import match_spesen
+    from .model import fmt_eur
+
+    result = match_spesen(_store(db))
+    months: dict[str, dict] = {}
+    for e in result["expenses"]:
+        m = months.setdefault(e["booking_date"][:7], {"sum": 0, "open": 0, "n": 0})
+        m["sum"] += -e["amount_cents"]
+        m["n"] += 1
+        if e["matched"] is None:
+            m["open"] += -e["amount_cents"]
+    table = Table(title="Spesen-Kandidaten vs. Erstattung")
+    for col in ("Monat", "Belege", "Summe", "davon offen"):
+        table.add_column(col, justify="right")
+    for m in sorted(months):
+        table.add_row(m, str(months[m]["n"]), fmt_eur(months[m]["sum"]),
+                      fmt_eur(months[m]["open"]) if months[m]["open"] else "—")
+    console.print(table)
+    console.print(
+        f"Erstattet gesamt: {fmt_eur(result['reimbursed_total'])} · "
+        f"Überhang Sammelreports: {fmt_eur(result['surplus'])}"
+    )
+    if result["unmatched"]:
+        console.print("[yellow]Ohne Beleg-Match (älter als Kulanzfrist):[/yellow]")
+        for e in result["unmatched"]:
+            console.print(
+                f"  {e['booking_date']}  {fmt_eur(-e['amount_cents'])}  "
+                f"{(e['counterparty'] or e['purpose'])[:60]}"
+            )
+
+
+@app.command()
 def summary(
     year: Optional[int] = typer.Option(None, "--year", "-y"),
     month: Optional[int] = typer.Option(None, "--month", "-m"),
