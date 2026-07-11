@@ -123,6 +123,23 @@ PROFILES: dict[str, CsvProfile] = {
         ),
         exclude_counterparty_contains=("PayPal (Europe)",),
     ),
+    # Miles & More Kreditkarte via Outbank-Export. Gefiltert werden:
+    # "Lastschrift" = Monatsausgleich von der Bank (beide Karten-Ären,
+    # sonst doppelt zur Bank-Abbuchung) und "Paypal *"-Zeilen = Funding-
+    # Legs von PayPal-Käufen (stecken schon in der PayPal-Detail-Lupe).
+    "mm": CsvProfile(
+        name="mm",
+        date_col="Datum",
+        value_date_col="Valuta",
+        amount_col="Betrag",
+        purpose_col="Zweck",
+        counterparty_col="Name",
+        booking_type_col="Buchungstext",
+        currency_col="Währung",
+        category_col="Kategorie",
+        encodings=("utf-8-sig",),
+        exclude_counterparty_contains=("Lastschrift", "Paypal", "PayPal"),
+    ),
     # Outbank app export (multi-year history, all German banks)
     "outbank": CsvProfile(
         name="outbank",

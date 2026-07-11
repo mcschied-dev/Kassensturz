@@ -40,12 +40,16 @@ CREATE TABLE IF NOT EXISTS balances (
 
 _DATE_LIKE = " AND booking_date LIKE ?"
 
-# "Lupen"-Konten: itemisierte Sicht (z. B. PayPal nach Händler), aber deren
-# Geld fließt bereits über die Bankkonten → aus Cashflow-Summen ausklammern,
-# sonst Doppelzählung. In `list`/Suche bleiben sie sichtbar.
-DETAIL_ACCOUNTS = ("paypal",)
-_NOT_DETAIL = " AND account NOT IN ({})".format(
-    ",".join("?" * len(DETAIL_ACCOUNTS))
+# Konsolidiertes Hauptbuch (seit 2026-07-11): Die Detail-Quellen (paypal,
+# mm-karte) ZÄHLEN im Cashflow — dafür werden die Sammelbuchungen der Banken
+# (Kreditkarten-Abrechnung, PayPal-Funding) per Kategorie neutralisiert
+# (NEUTRAL_CATEGORIES im Report). DETAIL_ACCOUNTS bleibt als Mechanismus
+# für künftige Nur-Lupe-Quellen erhalten, ist aber aktuell leer.
+DETAIL_ACCOUNTS: tuple[str, ...] = ()
+_NOT_DETAIL = (
+    " AND account NOT IN ({})".format(",".join("?" * len(DETAIL_ACCOUNTS)))
+    if DETAIL_ACCOUNTS
+    else ""
 )
 
 
@@ -205,7 +209,7 @@ class Store:
                         SUM(amount_cents) AS total_cents,
                         COUNT(*) AS n
                  FROM transactions WHERE 1=1"""
-        params: list = list(DETAIL_ACCOUNTS)
+        params: list = list(DETAIL_ACCOUNTS)  # leer, wenn kein Lupen-Konto
         sql += _NOT_DETAIL
         frag, frag_params = _period_filter(year, month)
         sql += frag

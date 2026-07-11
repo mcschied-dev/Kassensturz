@@ -81,7 +81,13 @@ class ReportData:
 
 
 # Categories that are money moving between own pockets, not income/expense.
-NEUTRAL_CATEGORIES = ("Umbuchung",)
+# Kreditkarten-Abrechnung + PayPal-Funding sind seit der Konsolidierung
+# neutral: die echten Käufe stehen itemisiert in mm-karte bzw. paypal.
+NEUTRAL_CATEGORIES = (
+    "Umbuchung",
+    "Kreditkarten-Abrechnung",
+    "PayPal-Funding (neutral)",
+)
 
 # Name marker for one-off effects (exits, inheritances, ...) that must not
 # distort the running income/expense picture — reported on their own line.

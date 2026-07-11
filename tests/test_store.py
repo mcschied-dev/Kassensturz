@@ -138,7 +138,10 @@ def test_balances_at_three_statuses():
     assert result["luecke"]["balance_cents"] is None
 
 
-def test_detail_accounts_excluded_from_summary_not_from_query():
+def test_consolidated_ledger_counts_detail_accounts():
+    """Seit der Konsolidierung zählen Detail-Konten (paypal, mm-karte) im
+    Cashflow mit — die Bank-Sammelbuchungen werden stattdessen über
+    NEUTRAL_CATEGORIES im Report neutralisiert."""
     store = Store(":memory:")
     store.add(
         [
@@ -146,10 +149,8 @@ def test_detail_accounts_excluded_from_summary_not_from_query():
             tx(account="paypal", amount=Decimal("-10.00"), category="Shopping"),
         ]
     )
-    # summary (cashflow) excludes the paypal detail account
     shopping = [r for r in store.summary() if r["category"] == "Shopping"]
-    assert shopping[0]["total_cents"] == -1000  # only the dkb row
-    # but the transaction is still queryable/searchable
+    assert shopping[0]["total_cents"] == -2000  # beide zählen
     assert len(store.query(account="paypal")) == 1
 
 
