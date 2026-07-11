@@ -56,7 +56,9 @@ _GP_WORDS = ("goeppingen", "göppingen", "goppingen", "uhingen", "filstal",
              "rechberghausen", "mercedes-benz leasing", "mercedes.benz leasing")
 _R_WORDS = ("regensburg", "heinkelstr", "obertraubling", "neutraubling",
             "bad abbach", "mintraching")
-_GP_CATS = ("Wohnen Göppingen", "Birgit")
+# Unterhalt Birgit zählt zu Göppingen (sie wohnt dort — das Geld
+# finanziert den Göppinger Haushalt), ebenso Marcs "Birgit"-Ausgaben
+_GP_CATS = ("Wohnen Göppingen", "Birgit", "Unterhalt Birgit")
 _R_CATS = ("Wohnung Heinkelstrasse", "Einrichtung Heinkelstrasse")
 
 
