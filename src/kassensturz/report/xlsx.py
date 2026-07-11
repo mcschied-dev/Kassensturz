@@ -59,7 +59,7 @@ _R_WORDS = ("regensburg", "heinkelstr", "obertraubling", "neutraubling",
 # Unterhalt Birgit zählt zu Göppingen (sie wohnt dort — das Geld
 # finanziert den Göppinger Haushalt), ebenso Marcs "Birgit"-Ausgaben
 _GP_CATS = ("Wohnen Göppingen", "Birgit", "Unterhalt Birgit")
-_R_CATS = ("Wohnung Heinkelstrasse", "Einrichtung Heinkelstrasse")
+_R_CATS = ("Miete Heinkelstrasse", "Einrichtung Heinkelstrasse")
 
 
 def _like_any(words: tuple[str, ...]) -> str:
