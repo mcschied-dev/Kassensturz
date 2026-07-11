@@ -246,7 +246,9 @@ SPESEN_SINCE = "2026-01-01"  # Emproof-Arbeitsvertrag ab 01.01.2026
 SPESEN_PATTERNS = (
     "db vertrieb", "db fernverkehr", "deutsche bahn", "vrr ",
     "stayery", "hotel", "mercure", "motel one", "8710 mo ",
-    "kantine.wtf", "lufthan", "flughafen", "rentalcars",
+    "mo berl", "mo bonn",  # Motel-One-Kartentexte ("5500 MO BERL UPPER WST")
+    "kantine.wtf", "lufthan", "flughafen", "muc airport", "rentalcars",
+    "record go", "circula",
     "bochum", "bremen",
 )
 

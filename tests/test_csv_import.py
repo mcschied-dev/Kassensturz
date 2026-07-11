@@ -36,6 +36,12 @@ def test_parse_german_decimal():
     assert parse_german_decimal("3.500,00") == Decimal("3500.00")
     assert parse_german_decimal("−54,30") == Decimal("-54.30")  # unicode minus
     assert parse_german_decimal("1234.56") == Decimal("1234.56")
+    # Tausenderpunkt OHNE Dezimalkomma (DB-Kartenportal bei glatten Beträgen):
+    # "-1.900" ist -1900,00 €, nicht -1,90 € — 3er-Gruppen hinter jedem Punkt
+    assert parse_german_decimal("-1.900") == Decimal("-1900")
+    assert parse_german_decimal("1.316.500") == Decimal("1316500")
+    # echter Dezimalpunkt (1-2 Nachkommastellen) bleibt Dezimalpunkt
+    assert parse_german_decimal("-1.90") == Decimal("-1.90")
 
 
 def test_dkb_import(tmp_path):

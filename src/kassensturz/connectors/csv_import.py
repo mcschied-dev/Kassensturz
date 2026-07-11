@@ -29,6 +29,11 @@ def parse_german_decimal(raw: str) -> Decimal:
         raise InvalidOperation(f"empty amount: {raw!r}")
     if "," in s:
         s = s.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"[-+]?\d{1,3}(\.\d{3})+", s):
+        # deutscher Tausenderpunkt OHNE Dezimalkomma ("-1.900" = -1900,00 —
+        # so exportiert das DB-Kartenportal glatte Beträge); ein echter
+        # Dezimalpunkt hat nie exakt 3er-Gruppen hinter jedem Punkt
+        s = s.replace(".", "")
     return Decimal(s)
 
 
