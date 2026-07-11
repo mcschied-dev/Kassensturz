@@ -50,7 +50,10 @@ ORT_GP = "Göppingen"
 ORT_R = "Regensburg"
 ORT_SONST = "überregional / online"
 _GP_WORDS = ("goeppingen", "göppingen", "goppingen", "uhingen", "filstal",
-             "eislingen", "faurndau", "dornierstrasse")
+             "eislingen", "faurndau", "dornierstrasse",
+             # Umland + Göppinger Leben laut Marc: Staufers Markthalle
+             # Rechberghausen; Mercedes-Leasing = Birgits Auto in Göppingen
+             "rechberghausen", "mercedes-benz leasing", "mercedes.benz leasing")
 _R_WORDS = ("regensburg", "heinkelstr", "obertraubling", "neutraubling",
             "bad abbach", "mintraching")
 _GP_CATS = ("Wohnen Göppingen", "Birgit")
