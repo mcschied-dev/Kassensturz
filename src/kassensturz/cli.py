@@ -381,6 +381,25 @@ def check(
     console.print("[green]Alle Invarianten halten.[/green]")
 
 
+@app.command("export-xlsx")
+def export_xlsx_cmd(
+    out: Path = typer.Option(
+        Path("reports/kassensturz.xlsx"), "--out", "-o",
+        help="Zieldatei (wird überschrieben — das Workbook ist ein Artefakt).",
+    ),
+    first_year: str = typer.Option("2022", "--ab", help="Erstes Berichtsjahr."),
+    db: Path = DbOption,
+) -> None:
+    """LibreOffice-Workbook: Dashboard + ein Jahres-Sheet pro Jahr.
+
+    Nach jedem Sync/Import neu generieren — nie von Hand fortschreiben.
+    """
+    from .report.xlsx import build_workbook
+
+    path = build_workbook(_store(db), out, first_year)
+    console.print(f"[green]Workbook geschrieben:[/green] {path}")
+
+
 @app.command()
 def spesen(
     db: Path = DbOption,

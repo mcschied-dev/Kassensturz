@@ -18,6 +18,7 @@ dependencies = [
     "requests>=2.34.2",
     "cryptography>=49.0.0",
     "pytr>=0.4.9",
+    "openpyxl>=3.1.5",
 ]
 
 [project.optional-dependencies]
