@@ -43,6 +43,35 @@ _BASE = (
     f" AND COALESCE(category,'') NOT LIKE '%{SPECIAL_MARKER}%'"
 )
 
+# Orts-Zuordnung: erst eindeutige Kategorien (Wohnungen), dann Städtenamen
+# in Empfänger/Zweck (Karten-/Debitumsätze tragen die Stadt im Text).
+# Nicht Zuordenbares bleibt ehrlich "überregional / online".
+ORT_GP = "Göppingen"
+ORT_R = "Regensburg"
+ORT_SONST = "überregional / online"
+_GP_WORDS = ("goeppingen", "göppingen", "goppingen", "uhingen", "filstal",
+             "eislingen", "faurndau", "dornierstrasse")
+_R_WORDS = ("regensburg", "heinkelstr", "obertraubling", "neutraubling",
+            "bad abbach", "mintraching")
+_GP_CATS = ("Wohnen Göppingen", "Birgit")
+_R_CATS = ("Wohnung Heinkelstrasse", "Einrichtung Heinkelstrasse")
+
+
+def _like_any(words: tuple[str, ...]) -> str:
+    return " OR ".join(
+        f"lower(counterparty || ' ' || purpose) LIKE '%{w}%'" for w in words
+    )
+
+
+_ORT_EXPR = f"""CASE
+  WHEN category IN ({",".join(f"'{c}'" for c in _GP_CATS)}) THEN '{ORT_GP}'
+  WHEN category IN ({",".join(f"'{c}'" for c in _R_CATS)}) THEN '{ORT_R}'
+  WHEN {_like_any(_GP_WORDS)} THEN '{ORT_GP}'
+  WHEN {_like_any(_R_WORDS)} THEN '{ORT_R}'
+  ELSE '{ORT_SONST}'
+END"""
+ORTE = (ORT_GP, ORT_R, ORT_SONST)
+
 
 def _q(store: Store, sql: str, params: tuple = ()) -> list:
     return store.conn.execute(sql, params).fetchall()
@@ -233,6 +262,37 @@ def _dashboard(store: Store, ws, years: list[str]) -> None:
                 (3 + len(years), d["s"] / 100, EUR_FMT),
             ])
 
+    # Ausgaben nach Ort × Jahre (Göppingen vs. Regensburg)
+    row = _section(ws, row + 3, "Ausgaben nach Ort × Jahre")
+    row += 1
+    _table_header(ws, row, 2, ["Ort", *years, "Gesamt"])
+    ort_by_year = {
+        (r["ort"], r["y"]): r["s"]
+        for r in _q(
+            store,
+            f"SELECT {_ORT_EXPR} ort, substr(booking_date,1,4) y, "
+            "       SUM(amount_cents) s "
+            f"FROM transactions WHERE amount_cents<0 {_BASE} "
+            "AND substr(booking_date,1,4)>=? GROUP BY ort, y",
+            (years[0],),
+        )
+    }
+    for ort in ORTE:
+        row += 1
+        _cell(ws, row, 2, ort)
+        for i, y in enumerate(years):
+            _cell(ws, row, 3 + i, ort_by_year.get((ort, y), 0) / 100, EUR_FMT)
+        _cell(ws, row, 3 + len(years),
+              sum(ort_by_year.get((ort, y), 0) for y in years) / 100,
+              EUR_FMT, bold=True)
+    row += 1
+    _cell(ws, row, 2, "Gesamt", bold=True)
+    for i, y in enumerate(years):
+        _cell(ws, row, 3 + i,
+              sum(ort_by_year.get((o, y), 0) for o in ORTE) / 100, EUR_FMT, bold=True)
+    _cell(ws, row, 3 + len(years),
+          sum(ort_by_year.values()) / 100, EUR_FMT, bold=True)
+
     ws.freeze_panes = "A2"
 
 
@@ -337,6 +397,70 @@ def _year_sheet(store: Store, ws, year: str) -> None:
                                      for d in details[:DETAIL_LIMIT])) / 100,
                  EUR_FMT),
             ])
+
+    # Ausgaben nach Ort: Göppingen vs. Regensburg, zweistufiges Drilldown
+    # (Ort → Kategorien → Einzelbuchungen)
+    row = _section(ws, row + 3, "Ausgaben nach Ort")
+    row += 1
+    _table_header(ws, row, 2, ["Ort", "Betrag", "Anteil"])
+    for ort in ORTE:
+        s_ort = _q(
+            store,
+            "SELECT COALESCE(SUM(amount_cents),0) s FROM transactions "
+            f"WHERE substr(booking_date,1,4)=? AND amount_cents<0 {_BASE} "
+            f"AND {_ORT_EXPR}=?",
+            (year, ort),
+        )[0]["s"]
+        row += 1
+        _cell(ws, row, 2, ort, bold=True)
+        _cell(ws, row, 3, s_ort / 100, EUR_FMT, bold=True)
+        _cell(ws, row, 4, (s_ort / exp) if exp else 0, PCT_FMT)
+        for cat_row in _q(
+            store,
+            "SELECT COALESCE(category,'(unkategorisiert)') c, SUM(amount_cents) s "
+            f"FROM transactions WHERE substr(booking_date,1,4)=? AND amount_cents<0 "
+            f"{_BASE} AND {_ORT_EXPR}=? GROUP BY c ORDER BY s",
+            (year, ort),
+        ):
+            row += 1
+            _detail_row(ws, row, [
+                (2, f"  {cat_row['c']}", None),
+                (3, cat_row["s"] / 100, EUR_FMT),
+            ])
+            cat_filter = (
+                "category IS NULL" if cat_row["c"] == "(unkategorisiert)"
+                else "category=?"
+            )
+            params = ((year, ort) if cat_row["c"] == "(unkategorisiert)"
+                      else (year, ort, cat_row["c"]))
+            details = _q(
+                store,
+                "SELECT booking_date, counterparty, amount_cents FROM transactions "
+                f"WHERE substr(booking_date,1,4)=? AND amount_cents<0 {_BASE} "
+                f"AND {_ORT_EXPR}=? AND {cat_filter} "
+                f"ORDER BY amount_cents LIMIT {DETAIL_LIMIT + 1}",
+                params,
+            )
+            for d in details[:DETAIL_LIMIT]:
+                row += 1
+                _detail_row(ws, row, [
+                    (2, f"      {d['booking_date'][5:]}", None),
+                    (3, d["amount_cents"] / 100, EUR_FMT),
+                    (4, (d["counterparty"] or "")[:45], None),
+                ])
+                ws.row_dimensions[row].outline_level = 2
+            if len(details) > DETAIL_LIMIT:
+                shown = sum(d["amount_cents"] for d in details[:DETAIL_LIMIT])
+                row += 1
+                _detail_row(ws, row, [
+                    (2, "      … weitere Buchungen", None),
+                    (3, (cat_row["s"] - shown) / 100, EUR_FMT),
+                ])
+                ws.row_dimensions[row].outline_level = 2
+    row += 1
+    _cell(ws, row, 2, "Gesamt", bold=True)
+    _cell(ws, row, 3, exp / 100, EUR_FMT, bold=True)
+    _cell(ws, row, 4, 1.0 if exp else 0, PCT_FMT)
 
     # Größte Einzelposten + Top-Händler nebeneinander
     top_row = _section(ws, row + 3, "Größte Einzelposten (Ausgaben)")
