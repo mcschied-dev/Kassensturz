@@ -46,7 +46,7 @@ def test_workbook_sheets_and_consolidation(tmp_path):
     store.record_balances([("test", "2025-06-01", 123456, "EUR", "t")])
     out = build_workbook(store, tmp_path / "wb.xlsx", first_year="2024")
     wb = load_workbook(out)
-    assert wb.sheetnames == ["Dashboard", "2024", "2025"]
+    assert wb.sheetnames == ["Dashboard", "Verträge & Abos", "2024", "2025"]
     ws = wb["2024"]
     kpis = {ws.cell(row=4, column=2 + i * 2).value:
             ws.cell(row=5, column=2 + i * 2).value for i in range(5)}

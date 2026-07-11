@@ -506,12 +506,119 @@ def _year_sheet(store: Store, ws, year: str) -> None:
     ws.freeze_panes = "A2"
 
 
+# --- Verträge & Abos: wiederkehrende Zahlungen automatisch erkennen ---------
+#
+# Gruppierung nach (normalisiertem Anbieter, Betrag) — so werden mehrere
+# Apple-/Google-Abos mit unterschiedlichen Beträgen einzeln erkannt und
+# Preiserhöhungen als "alte Linie beendet / neue aktiv" sichtbar.
+
+_TURNUS = (  # (min Tage, max Tage, Label, Zahlungen pro Jahr)
+    (24, 38, "monatlich", 12),
+    (52, 75, "2-monatlich", 6),
+    (80, 105, "quartalsweise", 4),
+    (165, 205, "halbjährlich", 2),
+    (330, 420, "jährlich", 1),
+)
+
+
+def _abo_key(counterparty: str) -> str:
+    import re as _re
+
+    s = _re.sub(r"[^a-zäöüß ]", " ", counterparty.lower())
+    tokens = [t for t in s.split() if len(t) > 2][:2]
+    return " ".join(tokens)
+
+
+def _detect_abos(store: Store, today: date) -> list[dict]:
+    from statistics import median, pstdev
+
+    groups: dict[tuple[str, int], list] = {}
+    for r in _q(
+        store,
+        "SELECT counterparty, COALESCE(category,'(unkategorisiert)') c,"
+        "       booking_date, amount_cents "
+        f"FROM transactions WHERE amount_cents < 0 {_BASE} "
+        "ORDER BY booking_date",
+    ):
+        key = _abo_key(r["counterparty"])
+        if key:
+            groups.setdefault((key, r["amount_cents"]), []).append(r)
+
+    abos = []
+    for (_key, amount), rows in groups.items():
+        if len(rows) < 3:
+            continue
+        dates = [date.fromisoformat(r["booking_date"]) for r in rows]
+        gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
+        med = median(gaps)
+        turnus = next((t for t in _TURNUS if t[0] <= med <= t[1]), None)
+        # Abos sind regelmäßig — unruhige Intervalle sind Einkaufsmuster
+        if turnus is None or (len(gaps) > 1 and pstdev(gaps) > 0.35 * med):
+            continue
+        active = (today - dates[-1]).days <= med * 1.8
+        import re as _re
+
+        # FinTS klebt die IBAN vor den Namen — fürs Auge entfernen
+        anbieter = _re.sub(r"^DE\d{20}", "", rows[-1]["counterparty"]).strip()
+        abos.append({
+            "anbieter": anbieter[:38],
+            "kategorie": rows[-1]["c"],
+            "turnus": turnus[2],
+            "betrag": -amount,
+            "jahr": -amount * turnus[3],
+            "seit": dates[0].isoformat(),
+            "letzte": dates[-1].isoformat(),
+            "n": len(rows),
+            "aktiv": active,
+        })
+    abos.sort(key=lambda a: (not a["aktiv"], -a["jahr"]))
+    return abos
+
+
+def _abos_sheet(store: Store, ws) -> None:
+    ws.sheet_view.showGridLines = False
+    _widths(ws, {1: 2, 2: 36, 3: 22, 4: 13, 5: 12, 6: 13, 7: 11, 8: 11, 9: 10})
+    ws.cell(row=2, column=2, value="Verträge & Abos").font = F_TITLE
+    ws.cell(row=3, column=2,
+            value="automatisch erkannt: ≥3 Zahlungen, gleicher Betrag, "
+                  "regelmäßiger Rhythmus — kein Anspruch auf Vollständigkeit "
+                  "bei schwankenden Beträgen (z. B. verbrauchsabhängige "
+                  "Tarife)").font = F_DIM
+
+    today = date.today()
+    abos = _detect_abos(store, today)
+    aktiv_jahr = sum(a["jahr"] for a in abos if a["aktiv"])
+    row = _kpis(ws, 5, [
+        ("Aktive Verträge/Abos", sum(1 for a in abos if a["aktiv"])),
+        ("Kosten pro Jahr (aktiv)", aktiv_jahr / 100),
+        ("davon monatlich gebunden",
+         sum(a["betrag"] for a in abos if a["aktiv"] and a["turnus"] == "monatlich")
+         / 100),
+    ])
+    _table_header(ws, row, 2, ["Anbieter", "Kategorie", "Turnus", "Betrag",
+                               "Kosten/Jahr", "seit", "letzte", "Status"])
+    for a in abos:
+        row += 1
+        _cell(ws, row, 2, a["anbieter"], bold=a["aktiv"])
+        _cell(ws, row, 3, a["kategorie"])
+        _cell(ws, row, 4, f"{a['turnus']} ({a['n']}×)")
+        _cell(ws, row, 5, a["betrag"] / 100, EUR_FMT)
+        _cell(ws, row, 6, a["jahr"] / 100, EUR_FMT, bold=a["aktiv"])
+        _cell(ws, row, 7, a["seit"])
+        _cell(ws, row, 8, a["letzte"])
+        c = _cell(ws, row, 9, "aktiv" if a["aktiv"] else "beendet")
+        c.font = Font(size=9, bold=a["aktiv"],
+                      color="1A7F37" if a["aktiv"] else "999999")
+    ws.freeze_panes = "A2"
+
+
 def build_workbook(store: Store, out_path: Path, first_year: str = "2022") -> Path:
     years = _years(store, first_year)
     if not years:
         raise ValueError(f"keine Buchungen ab {first_year} in der Datenbank")
     wb = Workbook()
     _dashboard(store, wb.active, years)
+    _abos_sheet(store, wb.create_sheet("Verträge & Abos"))
     for y in years:
         _year_sheet(store, wb.create_sheet(y), y)
     out_path = out_path.resolve()
