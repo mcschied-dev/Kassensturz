@@ -341,6 +341,28 @@ def categorize(
 
 
 @app.command()
+def check(
+    db: Path = DbOption,
+) -> None:
+    """Sanity-Check: Salden, Deckung der Neutral-Buchungen, Lücken.
+
+    Nach jedem Import/Sync ausführen — Exit-Code 1 bei Warnungen.
+    """
+    from .check import run_all
+
+    store = _store(db)
+    findings = run_all(store)
+    icons = {"ok": "[green]✓[/green]", "info": "[cyan]i[/cyan]", "warn": "[red]![/red]"}
+    for f in findings:
+        console.print(f"{icons[f.level]} [dim]{f.check}[/dim] {f.message}")
+    warns = sum(1 for f in findings if f.level == "warn")
+    if warns:
+        console.print(f"[red]{warns} Warnung(en) — Zahlen sind so NICHT belastbar.[/red]")
+        raise typer.Exit(1)
+    console.print("[green]Alle Invarianten halten.[/green]")
+
+
+@app.command()
 def summary(
     year: Optional[int] = typer.Option(None, "--year", "-y"),
     month: Optional[int] = typer.Option(None, "--month", "-m"),

@@ -1,0 +1,116 @@
+"""Sanity-check invariants — the court-proofness layer."""
+
+from datetime import date
+from decimal import Decimal
+
+from kassensturz.check import (
+    check_balance_reconciliation,
+    check_monthly_gaps,
+    check_settlement_backing,
+    check_transfer_residual,
+    check_uncategorized_income,
+)
+from kassensturz.model import Transaction
+from kassensturz.store import Store
+
+
+def tx(**kwargs) -> Transaction:
+    defaults = dict(
+        booking_date=date(2026, 6, 1),
+        amount=Decimal("-10.00"),
+        currency="EUR",
+        account="test",
+        counterparty="Shop",
+        purpose="Kauf",
+    )
+    defaults.update(kwargs)
+    return Transaction(**defaults)
+
+
+def levels(findings, check_name):
+    return [f.level for f in findings if f.check == check_name]
+
+
+def test_balance_reconciliation_exact_and_opening():
+    store = Store(":memory:")
+    store.add([tx(account="voll", amount=Decimal("100.00"))])
+    store.add([tx(account="alt", amount=Decimal("50.00"))])
+    store.record_balances(
+        [
+            ("voll", "2026-07-01", 10000, "EUR", "t"),   # == Summe → ok
+            ("alt", "2026-07-01", 20000, "EUR", "t"),    # 150 € Anfangssaldo → info
+            ("depot", "2026-07-01", 99900, "EUR", "t"),  # nur Saldo → info
+        ]
+    )
+    f = check_balance_reconciliation(store)
+    msgs = {m.message.split(":")[0]: m.level for m in f}
+    assert msgs["voll"] == "ok"
+    assert msgs["alt"] == "info"
+    assert msgs["depot"] == "info"
+
+
+def test_settlement_backing_flags_stale_detail():
+    store = Store(":memory:")
+    # settlements keep arriving, detail source stopped months earlier
+    store.add(
+        [
+            tx(booking_date=date(2026, 6, 15), category="Kreditkarten-Abrechnung"),
+            tx(account="mm-karte", booking_date=date(2026, 2, 1)),
+        ]
+    )
+    f = check_settlement_backing(store, today=date(2026, 7, 1))
+    assert levels(f, "deckung") == ["warn"]
+    # fresh detail → ok
+    store.add([tx(account="mm-karte", booking_date=date(2026, 6, 10))])
+    f = check_settlement_backing(store, today=date(2026, 7, 1))
+    assert levels(f, "deckung") == ["ok"]
+
+
+def test_settlement_without_any_detail_is_warned():
+    store = Store(":memory:")
+    store.add([tx(category="PayPal-Funding (neutral)")])
+    f = check_settlement_backing(store)
+    assert levels(f, "deckung") == ["warn"]
+
+
+def test_transfer_residual():
+    store = Store(":memory:")
+    store.add(
+        [
+            tx(amount=Decimal("-500.00"), category="Umbuchung", account="a"),
+            tx(amount=Decimal("500.00"), category="Umbuchung", account="b"),
+            # external flow (no counter-booking in DB) must not trip the check
+            tx(
+                amount=Decimal("-5000.00"),
+                category="Umbuchung",
+                counterparty="Trade Republic",
+            ),
+        ]
+    )
+    assert levels(check_transfer_residual(store), "umbuchung") == ["ok"]
+    store.add([tx(amount=Decimal("-2000.00"), category="Umbuchung", purpose="solo")])
+    assert levels(check_transfer_residual(store), "umbuchung") == ["warn"]
+
+
+def test_uncategorized_income():
+    store = Store(":memory:")
+    store.add([tx(amount=Decimal("300.00"), category=None)])
+    assert levels(check_uncategorized_income(store), "einnahmen") == ["ok"]
+    store.add([tx(amount=Decimal("9000.00"), category=None, purpose="wo her?")])
+    assert levels(check_uncategorized_income(store), "einnahmen") == ["warn"]
+
+
+def test_monthly_gaps():
+    store = Store(":memory:")
+    # 100+ bookings in Jan..Mar with April missing, May present → warn
+    batch = [
+        tx(account="giro", booking_date=date(2026, m, d))
+        for m in (1, 2, 3)
+        for d in range(1, 28)
+    ] + [tx(account="giro", booking_date=date(2026, 5, 2))]
+    store.add(batch)
+    f = check_monthly_gaps(store, min_rows=50)
+    assert levels(f, "lücken") == ["warn"]
+    assert "2026-04" in f[0].message
+    store.add([tx(account="giro", booking_date=date(2026, 4, 10))])
+    assert levels(check_monthly_gaps(store, min_rows=50), "lücken") == ["ok"]
