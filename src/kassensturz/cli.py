@@ -116,7 +116,26 @@ def _print_rundruf_table(results: list[tuple]) -> None:
 
 
 def _tan_callback(response) -> str:
-    """Interactive TAN entry; decoupled = confirm in app, then Enter."""
+    """Interactive TAN entry; decoupled = confirm in app.
+
+    Ohne TTY (Agent-/Chat-Betrieb) wird bei decoupled pushTAN GEPOLLT:
+    der Aufrufer bestätigt in der App, python-fints fragt den Status per
+    send_tan(challenge, "") ab (3956 = noch offen) — wie beim DKB-Flow.
+    """
+    import time
+
+    if getattr(response, "decoupled", False) and not sys.stdin.isatty():
+        polls = getattr(_tan_callback, "_polls", 0) + 1
+        _tan_callback._polls = polls
+        if polls == 1:
+            console.print(
+                "  [dim]→ Freigabe in der S-pushTAN-App bestätigen "
+                "(warte bis zu 5 Minuten) …[/dim]"
+            )
+        if polls > 100:
+            raise TanRequired("App-Freigabe nicht erhalten (Timeout nach 5 Min).")
+        time.sleep(3)
+        return ""
     try:
         if getattr(response, "decoupled", False):
             typer.prompt(
