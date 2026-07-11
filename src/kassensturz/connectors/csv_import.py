@@ -140,6 +140,24 @@ PROFILES: dict[str, CsvProfile] = {
         encodings=("utf-8-sig",),
         exclude_counterparty_contains=("Lastschrift", "Paypal", "PayPal"),
     ),
+    # Miles & More Gold Credit Card, Export aus dem DB-Kartenportal
+    # (banking.miles-and-more-kreditkarte.com). Mehrere Abrechnungs-
+    # Sektionen pro Datei; Händler steht im Verwendungszweck (dient auch
+    # als Counterparty). Doppelte "Betrag"-Spalte: DictReader behält die
+    # letzte = EUR-Betrag (Fremdwährung ist schon umgerechnet).
+    # "PAYPAL *"-Zeilen sind Funding-Legs (Detail liegt im paypal-Konto),
+    # "LASTSCHRIFT" wäre der Monatsausgleich — beide raus.
+    "db-kk": CsvProfile(
+        name="db-kk",
+        date_col="Belegdatum",
+        value_date_col="Eingangstag",
+        amount_col="Betrag",
+        purpose_col="Verwendungszweck",
+        counterparty_col="Verwendungszweck",
+        currency_col="Währung",
+        encodings=("utf-8-sig",),
+        exclude_counterparty_contains=("PAYPAL *", "LASTSCHRIFT"),
+    ),
     # Outbank app export (multi-year history, all German banks)
     "outbank": CsvProfile(
         name="outbank",
@@ -204,6 +222,10 @@ def _row_to_transaction(
     raw_date = row.get(profile.date_col, "")
     if not raw_amount or not raw_date:
         return None  # trailing/summary lines
+    if raw_amount == profile.amount_col and raw_date == profile.date_col:
+        return None  # repeated header (multi-section exports, e.g. db-kk)
+    if raw_date.rstrip(":") in ("Saldo", "Summe"):
+        return None  # per-section summary line (db-kk) — kein Umsatz
     booking_type = row.get(profile.booking_type_col or "", "").strip()
     if booking_type in profile.exclude_types:
         return None  # internal/funding legs (PayPal double entry)
