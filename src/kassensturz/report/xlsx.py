@@ -110,6 +110,24 @@ def _widths(ws, spec: dict[int, int]) -> None:
         ws.column_dimensions[get_column_letter(col)].width = w
 
 
+F_DETAIL = Font(size=9, color="555555")
+
+# Drilldown-Zeilen pro Kategorie (eingeklappt); darüber wird abgeschnitten
+# und der Rest als Sammelzeile ausgewiesen — kein stilles Kappen.
+DETAIL_LIMIT = 150
+
+
+def _detail_row(ws, row: int, values: list[tuple[int, object, str | None]]) -> None:
+    """Eine eingeklappte Drilldown-Zeile (outline level 1, hidden)."""
+    for col, value, fmt in values:
+        c = ws.cell(row=row, column=col, value=value)
+        c.font = F_DETAIL
+        if fmt:
+            c.number_format = fmt
+    ws.row_dimensions[row].outline_level = 1
+    ws.row_dimensions[row].hidden = True
+
+
 def _kpis(ws, row: int, pairs: list[tuple[str, float | int | str]]) -> int:
     for i, (label, value) in enumerate(pairs):
         col = 2 + i * 2
@@ -125,6 +143,7 @@ def _kpis(ws, row: int, pairs: list[tuple[str, float | int | str]]) -> int:
 def _dashboard(store: Store, ws, years: list[str]) -> None:
     ws.title = "Dashboard"
     ws.sheet_view.showGridLines = False
+    ws.sheet_properties.outlinePr.summaryBelow = False  # ⊞ an der Summenzeile
     _widths(ws, {1: 2, 2: 26, 3: 14, 4: 14, 5: 14, 6: 14, 7: 14, 8: 14})
 
     ws.cell(row=2, column=2, value="Kassensturz — Finanzbericht").font = F_TITLE
@@ -198,12 +217,28 @@ def _dashboard(store: Store, ws, years: list[str]) -> None:
             _cell(ws, row, 3 + i, by_year.get(y, 0) / 100, EUR_FMT)
         _cell(ws, row, 3 + len(years),
               sum(by_year.get(y, 0) for y in years) / 100, EUR_FMT, bold=True)
+        # Drilldown: Händler dieser Kategorie über alle Jahre
+        for d in _q(
+            store,
+            "SELECT COALESCE(NULLIF(counterparty,''),'(ohne Empfänger)') cp,"
+            "       COUNT(*) n, SUM(amount_cents) s "
+            "FROM transactions WHERE category=? AND amount_cents<0 "
+            "GROUP BY lower(cp) ORDER BY s LIMIT ?",
+            (cat, DETAIL_LIMIT),
+        ):
+            row += 1
+            _detail_row(ws, row, [
+                (2, f"    {d['cp'][:34]}", None),
+                (3, d["n"], None),
+                (3 + len(years), d["s"] / 100, EUR_FMT),
+            ])
 
     ws.freeze_panes = "A2"
 
 
 def _year_sheet(store: Store, ws, year: str) -> None:
     ws.sheet_view.showGridLines = False
+    ws.sheet_properties.outlinePr.summaryBelow = False
     _widths(ws, {1: 2, 2: 12, 3: 14, 4: 14, 5: 14, 6: 4,
                  7: 34, 8: 14, 9: 10, 10: 4, 11: 12, 12: 34, 13: 18, 14: 14})
 
@@ -268,6 +303,40 @@ def _year_sheet(store: Store, ws, year: str) -> None:
         _cell(ws, row, 2, r["c"])
         _cell(ws, row, 3, r["s"] / 100, EUR_FMT)
         _cell(ws, row, 4, (r["s"] / exp) if exp else 0, PCT_FMT)
+        # Drilldown: Einzelbuchungen der Kategorie (⊞ in LibreOffice)
+        cat_filter = (
+            "category IS NULL" if r["c"] == "(unkategorisiert)" else "category=?"
+        )
+        params: tuple = (year,) if r["c"] == "(unkategorisiert)" else (year, r["c"])
+        details = _q(
+            store,
+            "SELECT booking_date, counterparty, amount_cents FROM transactions "
+            f"WHERE substr(booking_date,1,4)=? AND {cat_filter} AND amount_cents<0 "
+            f"ORDER BY amount_cents LIMIT {DETAIL_LIMIT + 1}",
+            params,
+        )
+        for d in details[:DETAIL_LIMIT]:
+            row += 1
+            _detail_row(ws, row, [
+                (2, d["booking_date"][5:], None),  # MM-TT reicht im Jahresblatt
+                (3, d["amount_cents"] / 100, EUR_FMT),
+                (4, (d["counterparty"] or "")[:45], None),
+            ])
+        if len(details) > DETAIL_LIMIT:
+            rest = _q(
+                store,
+                "SELECT COUNT(*) n, SUM(amount_cents) s FROM transactions "
+                f"WHERE substr(booking_date,1,4)=? AND {cat_filter} "
+                "AND amount_cents<0",
+                params,
+            )[0]
+            row += 1
+            _detail_row(ws, row, [
+                (2, f"… weitere {rest['n'] - DETAIL_LIMIT} Buchungen", None),
+                (3, (rest["s"] - sum(d["amount_cents"]
+                                     for d in details[:DETAIL_LIMIT])) / 100,
+                 EUR_FMT),
+            ])
 
     # Größte Einzelposten + Top-Händler nebeneinander
     top_row = _section(ws, row + 3, "Größte Einzelposten (Ausgaben)")
