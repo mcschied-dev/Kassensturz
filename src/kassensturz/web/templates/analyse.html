@@ -6,7 +6,7 @@
 
 <section class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
   <div class="flex flex-wrap items-center justify-between gap-3">
-    <h2 class="text-sm font-semibold text-white">Einnahmen vs. Ausgaben je Monat</h2>
+    <h2 class="label">Einnahmen vs. Ausgaben je Monat</h2>
     <div class="flex flex-wrap gap-4 text-xs text-zinc-400">
       <label class="flex cursor-pointer items-center gap-1.5">
         <input id="cb-sonder" type="checkbox"
@@ -27,15 +27,15 @@
 </section>
 
 <section class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
-  <h2 class="text-sm font-semibold text-white">Sparen vs. Entsparen je Monat <span class="font-normal text-zinc-400">(Saldo bereinigt, ohne Sondereffekte)</span></h2>
+  <h2 class="label">Sparen vs. Entsparen je Monat <span class="font-normal text-zinc-400">(Saldo bereinigt, ohne Sondereffekte)</span></h2>
   <div id="chart-spar" class="mt-2 h-[300px] w-full"></div>
-  <h2 class="mt-4 text-sm font-semibold text-white">Kumuliert seit 2022 <span class="font-normal text-zinc-400">(vom laufenden Einkommen aus finanziert — der DRACOON-Exit deckt die Lücke)</span></h2>
+  <h2 class="label mt-6 block">Kumuliert seit 2022 <span class="font-normal text-zinc-400">(vom laufenden Einkommen aus finanziert — der DRACOON-Exit deckt die Lücke)</span></h2>
   <div id="chart-kum" class="mt-2 h-[180px] w-full"></div>
 </section>
 
 <section id="entnahme" class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
   <div class="flex flex-wrap items-end justify-between gap-4">
-    <h2 class="text-sm font-semibold text-white">Vermögens-Prognose: Kapitalentnahme <span class="font-normal text-zinc-400">(Forecast-Basis, ohne Kiteworks/Steuererstattung)</span></h2>
+    <h2 class="label">Vermögens-Prognose: Kapitalentnahme <span class="font-normal text-zinc-400">(Forecast-Basis, ohne Kiteworks/Steuererstattung)</span></h2>
     <form method="get" action="/analyse#entnahme" class="flex flex-wrap items-end gap-2 text-xs">
       <label class="block"><span class="text-zinc-400">Entnahme €</span>
         <input name="entnahme" value="{{ '%.0f' % entnahme }}" size="7"
@@ -61,7 +61,7 @@
 
 <section id="zufluss" class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
   <div class="flex flex-wrap items-end justify-between gap-4">
-    <h2 class="text-sm font-semibold text-white">Vermögens-Prognose: Kapitalzuflüsse <span class="font-normal text-zinc-400">(Sondereffekte — Betrag + Stichtag, mehrere möglich)</span></h2>
+    <h2 class="label">Vermögens-Prognose: Kapitalzuflüsse <span class="font-normal text-zinc-400">(Sondereffekte — Betrag + Stichtag, mehrere möglich)</span></h2>
     <form method="get" action="/analyse#zufluss" class="flex flex-wrap items-end gap-2 text-xs">
       <input type="hidden" name="entnahme" value="{{ '%.0f' % entnahme }}">
       <input type="hidden" name="kosten" value="{{ '%.0f' % kosten }}">
@@ -90,7 +90,7 @@
 </section>
 
 <section class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
-  <h2 class="text-sm font-semibold text-white">Finanzierungs-Rechner <span class="font-normal text-zinc-400">(Miete → Hausfinanzierung · rein lokal, keine Beratung)</span></h2>
+  <h2 class="label">Finanzierungs-Rechner <span class="font-normal text-zinc-400">(Miete → Hausfinanzierung · rein lokal, keine Beratung)</span></h2>
   <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
     {% for id, label, wert, step in [('f-rate', 'Rate €/Monat', 3000, 100),
                                       ('f-zins', 'Sollzins % p.a.', 3.8, 0.1),
@@ -116,11 +116,11 @@
 </section>
 
 <section class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
-  <h2 class="text-sm font-semibold text-white">Ausgaben nach Kategorie je Monat <span class="font-normal text-zinc-400">(Top 6 + Übrige)</span></h2>
+  <h2 class="label">Ausgaben nach Kategorie je Monat <span class="font-normal text-zinc-400">(Top 6 + Übrige)</span></h2>
   <div id="chart-kat" class="mt-2 h-[380px] w-full"></div>
 </section>
 
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="/static/echarts.min.js"></script>
 <script>
 const MONATE = {{ monate | tojson }};
 const EIN = {{ ein | tojson }};
@@ -138,7 +138,7 @@ const EREIGNISSE = {{ ereignisse | tojson }};   // [[Stichtag, Betrag], …]
 const ZUFLUSS_ZINS = {{ zufluss_zins | tojson }};
 
 const eur = v => v.toLocaleString('de-DE', {style: 'currency', currency: 'EUR', maximumFractionDigits: 0});
-const INK = '#a1a1aa', GRID = 'rgba(255,255,255,0.06)';
+const INK = '#8a8a8a', GRID = '#1a1a1a';
 // Kategorien-Palette: validiert gegen zinc-900 (Lightness, CVD, Kontrast)
 const KAT_FARBEN = ['#3b82f6', '#d97706', '#059669', '#8b5cf6', '#db2777', '#0891b2', '#52525b'];
 
@@ -159,7 +159,7 @@ const basis = {
   ],
   tooltip: {
     trigger: 'axis', axisPointer: { type: 'cross', label: { show: false } },
-    backgroundColor: '#27272a', borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#141414', borderColor: '#232323',
     textStyle: { color: '#fafafa' },
     valueFormatter: v => v == null ? '—' : v.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'}),
   },
@@ -319,7 +319,7 @@ const kat = echarts.init(document.getElementById('chart-kat'));
 kat.setOption({ ...basis, series: KAT.map((s, i) => ({
   name: s.name, type: 'bar', stack: 'a', data: s.werte,
   color: KAT_FARBEN[i] ?? KAT_FARBEN.at(-1),
-  itemStyle: { borderColor: '#18181b', borderWidth: 1 },
+  itemStyle: { borderColor: '#0a0a0a', borderWidth: 1 },
 }))});
 
 addEventListener('resize', () => { ea.resize(); spar.resize(); kum.resize(); entnahme.resize(); zufluss.resize(); finanz.resize(); kat.resize(); });

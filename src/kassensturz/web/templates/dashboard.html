@@ -1,95 +1,133 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — kassensturz{% endblock %}
 {% block content %}
-<div class="flex flex-wrap items-start justify-between gap-4">
-  <div>
-    <h1 class="text-xl font-semibold tracking-tight text-white">Dashboard</h1>
-    <p class="mt-1 text-sm text-zinc-400">Konsolidierte Sicht · neutrale Buchungen und Sondereffekte zählen nicht</p>
-  </div>
-  <div class="text-right">
-    <button id="sync-btn" title="Alle 4 Banken abrufen — DKB-Freigabe am iPhone nötig"
-            class="rounded-lg bg-white px-4 py-1.5 text-sm font-semibold text-zinc-900 hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-50">
-      Kontenrundruf</button>
-    <p id="sync-status" class="mt-1 text-xs text-zinc-500 tnum">
-      {%- if letzter_rundruf %}zuletzt {{ letzter_rundruf }} {{ '✓' if letzter_rc == '0' else '⚠' }}{% endif -%}
-    </p>
-    <details id="sync-log-box" class="mt-1 hidden text-left">
-      <summary class="cursor-pointer text-xs text-zinc-500">Protokoll</summary>
-      <pre id="sync-log" class="mt-1 max-h-48 max-w-md overflow-auto rounded-lg bg-zinc-950 p-3 text-[11px] leading-relaxed text-zinc-400"></pre>
-    </details>
-  </div>
-</div>
 
-<dl class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-  <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
-    <dt class="text-sm text-zinc-400">Gesamtvermögen</dt>
-    <dd class="mt-1 text-2xl font-semibold tracking-tight text-white tnum">{{ vermoegen | eur }}</dd>
+<section class="flex flex-wrap items-end justify-between gap-10 pb-10 pt-6">
+  <div>
+    <span class="label">Gesamtvermögen · {{ balances | length }} Konten · {{ balances[0].snapshot_date if balances else '' }}</span>
+    <div class="tnum mt-3 text-[54px] font-[350] leading-none text-white">
+      {{ '{:,}'.format(vermoegen // 100).replace(',', '.') }}<span class="text-[28px] text-zinc-500">,{{ '%02d' % (vermoegen % 100) }} €</span>
+    </div>
+    <p class="mt-4 text-[12.5px] text-zinc-400">
+      Saldo Ø der letzten 6 Monate <span class="tnum {{ 'text-[#f87171]' if schnitt6 < 0 else 'text-[#60a5fa]' }}">{{ schnitt6 | eur }}</span>/Monat
+      {%- if ausstehend %} · nach Gehaltslauf projiziert
+      <span class="tnum {{ 'text-[#f87171]' if projiziert < 0 else 'text-[#60a5fa]' }}">{{ projiziert | eur }}</span> im {{ ym }}
+      {%- elif gehalt_gebucht %} · Gehaltslauf {{ ym }} gebucht ✓{% endif %}
+    </p>
   </div>
-  <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+  <div class="flex flex-col items-end gap-6">
+    <div class="text-right">
+      <button id="sync-btn" title="Alle 4 Banken abrufen — DKB-Freigabe am iPhone nötig"
+              class="border border-[#232323] px-4 py-2 text-[12px] font-medium text-white hover:border-[#3a3a3a] hover:bg-[#111] disabled:cursor-wait disabled:opacity-40">
+        Kontenrundruf</button>
+      <p id="sync-status" class="tnum mt-1.5 text-[11px] text-zinc-500">
+        {%- if letzter_rundruf %}zuletzt {{ letzter_rundruf }} {{ '✓' if letzter_rc == '0' else '⚠' }}{% endif -%}
+      </p>
+      <details id="sync-log-box" class="mt-1 hidden text-left">
+        <summary class="cursor-pointer text-[11px] text-zinc-500">Protokoll</summary>
+        <pre id="sync-log" class="mt-1 max-h-48 max-w-md overflow-auto border border-[#232323] bg-[#0d0d0d] p-3 text-[11px] leading-relaxed text-zinc-400"></pre>
+      </details>
+    </div>
+    <div class="hidden text-right lg:block">
+      <span class="label mb-2 block">Monats-Saldo · {{ balken | length }} Monate</span>
+      <svg width="{{ balken | length * 35 + 8 }}" height="112" role="img" aria-label="Monats-Saldi der letzten Monate">
+        <line x1="0" y1="20" x2="{{ balken | length * 35 + 8 }}" y2="20" stroke="#232323" stroke-width="1"/>
+        {% for b in balken %}
+        {% if b.pos %}
+        <rect x="{{ loop.index0 * 35 + 8 }}" y="{{ 20 - [b.px, 18] | min }}" width="22" height="{{ [b.px, 18] | min }}"
+              fill="#60a5fa" {% if b.offen %}opacity="0.45"{% endif %}/>
+        {% else %}
+        <rect x="{{ loop.index0 * 35 + 8 }}" y="20" width="22" height="{{ b.px }}"
+              fill="#f87171" {% if b.offen %}opacity="0.45"{% endif %}/>
+        {% endif %}
+        {% endfor %}
+      </svg>
+      <div class="tnum mt-1 flex justify-between text-[10.5px] text-zinc-600">
+        <span>{{ balken[0].ym if balken }}</span><span>{{ balken[-1].ym if balken }} (offen)</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<dl class="grid grid-cols-2 border-y border-[#232323] lg:grid-cols-4">
+  <div class="border-[#232323] p-6 pl-0 lg:border-l-0">
     {% if ausstehend %}
-    <dt class="text-sm text-zinc-400">Einnahmen {{ ym }} <span class="text-zinc-500">projiziert</span></dt>
-    <dd class="mt-1 text-2xl font-semibold tracking-tight text-white tnum">{{ (einnahmen + ausstehend) | eur }}</dd>
-    <p class="mt-1 text-xs text-zinc-400 tnum">ohne Gehaltslauf {{ einnahmen | eur }} · Gehalt {{ ausstehend | eur }} erwartet{% if gehalt_tag %} ~{{ '%02d' % gehalt_tag }}.{{ ym[5:7] }}.{% endif %}</p>
+    <dt class="label">Saldo {{ ym }} · projiziert</dt>
+    <dd class="tnum mt-2.5 text-[24px] {{ 'text-[#f87171]' if projiziert < 0 else 'text-[#60a5fa]' }}">{{ projiziert | eur }}</dd>
+    <p class="mt-1.5 text-[11.5px] text-zinc-500">ohne Gehaltslauf <span class="tnum text-zinc-400">{{ saldo | eur }}</span> · ausstehend <span class="tnum text-zinc-400">{{ ausstehend | eur }}</span>
+      <a href="/einstellungen/dashboard" class="text-zinc-600 hover:text-zinc-400" title="Gehaltslauf einstellen">⚙</a></p>
     {% else %}
-    <dt class="text-sm text-zinc-400">Einnahmen {{ ym }}</dt>
-    <dd class="mt-1 text-2xl font-semibold tracking-tight text-white tnum">{{ einnahmen | eur }}</dd>
-    {% if gehalt_datum %}
-    <p class="mt-1 text-xs text-zinc-500 tnum">davon Gehalt {{ gehalt_summe | eur }} · {{ gehalt_datum[8:10] }}.{{ gehalt_datum[5:7] }}.</p>
-    {% endif %}
+    <dt class="label">Saldo {{ ym }}</dt>
+    <dd class="tnum mt-2.5 text-[24px] {{ 'text-[#f87171]' if saldo < 0 else 'text-[#60a5fa]' }}">{{ saldo | eur }}</dd>
+    {% if gehalt_gebucht %}<p class="mt-1.5 text-[11.5px] text-zinc-600">Gehaltslauf gebucht ✓</p>{% endif %}
     {% endif %}
   </div>
-  <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
-    <dt class="text-sm text-zinc-400">Ausgaben {{ ym }}</dt>
-    <dd class="mt-1 text-2xl font-semibold tracking-tight text-white tnum">{{ ausgaben | eur }}</dd>
-  </div>
-  <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+  <div class="border-l border-[#232323] p-6">
     {% if ausstehend %}
-    <dt class="text-sm text-zinc-400">Saldo {{ ym }} <span class="text-zinc-500">projiziert</span></dt>
-    <dd class="mt-1 text-2xl font-semibold tracking-tight tnum {{ 'text-red-400' if projiziert < 0 else 'text-emerald-400' }}">{{ projiziert | eur }}</dd>
-    <p class="mt-1 text-xs text-zinc-400 tnum">ohne Gehaltslauf {{ saldo | eur }} · ausstehend {{ ausstehend | eur }}
-      <a href="/einstellungen/dashboard" class="text-zinc-500 hover:underline" title="Gehaltslauf einstellen">⚙</a></p>
+    <dt class="label">Einnahmen · projiziert</dt>
+    <dd class="tnum mt-2.5 text-[24px] text-white">{{ (einnahmen + ausstehend) | eur }}</dd>
+    <p class="mt-1.5 text-[11.5px] text-zinc-500">ohne Gehaltslauf <span class="tnum text-zinc-400">{{ einnahmen | eur }}</span> · Gehalt erwartet{% if gehalt_tag %} <span class="tnum">~{{ '%02d' % gehalt_tag }}.{{ ym[5:7] }}.</span>{% endif %}</p>
     {% else %}
-    <dt class="text-sm text-zinc-400">Saldo {{ ym }}</dt>
-    <dd class="mt-1 text-2xl font-semibold tracking-tight tnum {{ 'text-red-400' if saldo < 0 else 'text-emerald-400' }}">{{ saldo | eur }}</dd>
-    {% if gehalt_gebucht %}
-    <p class="mt-1 text-xs text-zinc-500">Gehaltslauf gebucht ✓</p>
+    <dt class="label">Einnahmen {{ ym }}</dt>
+    <dd class="tnum mt-2.5 text-[24px] text-white">{{ einnahmen | eur }}</dd>
+    {% if gehalt_datum %}<p class="mt-1.5 text-[11.5px] text-zinc-500">davon Gehalt <span class="tnum text-zinc-400">{{ gehalt_summe | eur }}</span> · {{ gehalt_datum[8:10] }}.{{ gehalt_datum[5:7] }}.</p>{% endif %}
     {% endif %}
-    {% endif %}
+  </div>
+  <div class="border-l border-[#232323] p-6">
+    <dt class="label">Ausgaben {{ ym }}</dt>
+    <dd class="tnum mt-2.5 text-[24px] text-white">{{ (0 - ausgaben) | eur }}</dd>
+    <p class="mt-1.5 text-[11.5px] text-zinc-500"><a href="/buchungen" class="hover:text-zinc-300">Buchungen ansehen →</a></p>
+  </div>
+  <div class="border-l border-[#232323] p-6">
+    <dt class="label">Verträge aktiv</dt>
+    <dd class="tnum mt-2.5 text-[24px] text-white">{{ kosten_jahr | eur }}<span class="text-[13px] text-zinc-600">/J</span></dd>
+    <p class="mt-1.5 text-[11.5px] text-zinc-500">+ Sparpläne <span class="tnum text-zinc-400">{{ sparen_jahr | eur }}</span>/J</p>
   </div>
 </dl>
 
-<div class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-  <section class="rounded-2xl bg-zinc-900 shadow-sm ring-1 ring-white/10">
-    <h2 class="border-b border-white/10 px-5 py-3 text-sm font-semibold text-white">Kontostände (letzter Sync)</h2>
-    <table class="w-full text-sm">
-      <tbody class="divide-y divide-white/5">
+<div class="grid grid-cols-1 gap-16 pt-10 lg:grid-cols-12">
+  <section class="lg:col-span-5">
+    <h2 class="label">Konten · letzter Sync</h2>
+    <table class="mt-2 w-full text-[13px]">
+      <tbody>
         {% for b in balances %}
-        <tr>
-          <td class="px-5 py-2.5 text-white">{{ b.account }}</td>
-          <td class="px-5 py-2.5 text-right text-zinc-400">{{ b.snapshot_date }}</td>
-          <td class="px-5 py-2.5 text-right font-medium text-white tnum">
-            {{ b.balance_cents | eur }}{% if b.currency != 'EUR' %} <span class="text-zinc-500">{{ b.currency }}</span>{% endif %}</td>
+        <tr class="border-b border-[#1a1a1a]">
+          <td class="py-2.5 text-white">{{ b.account }}</td>
+          <td class="tnum py-2.5 text-right text-zinc-500">{{ b.snapshot_date }}</td>
+          <td class="tnum py-2.5 pl-6 text-right {{ 'text-white' if b.balance_cents >= 100000 else 'text-zinc-400' }}">
+            {{ b.balance_cents | eur }}{% if b.currency != 'EUR' %} <span class="text-zinc-600">{{ b.currency }}</span>{% endif %}</td>
         </tr>
         {% endfor %}
+        <tr>
+          <td class="py-3 font-medium text-white">Gesamt EUR</td><td></td>
+          <td class="tnum border-t border-[#232323] py-3 pl-6 text-right font-medium text-white">{{ vermoegen | eur }}</td>
+        </tr>
       </tbody>
     </table>
   </section>
 
-  <section class="rounded-2xl bg-zinc-900 shadow-sm ring-1 ring-white/10">
-    <h2 class="border-b border-white/10 px-5 py-3 text-sm font-semibold text-white">Letzte Buchungen</h2>
-    <table class="w-full text-sm">
-      <tbody class="divide-y divide-white/5">
+  <section class="lg:col-span-7">
+    <h2 class="label">Letzte Buchungen</h2>
+    <table class="mt-2 w-full text-[13px]">
+      <tbody>
         {% for t in letzte %}
-        <tr>
-          <td class="px-5 py-2.5 whitespace-nowrap text-zinc-400">{{ t.booking_date }}</td>
-          <td class="w-full max-w-0 truncate px-5 py-2.5 text-white">{{ t.counterparty or '—' }}</td>
-          <td class="px-5 py-2.5 text-right font-medium whitespace-nowrap tnum {{ 'text-red-400' if t.amount_cents < 0 else 'text-emerald-400' }}">{{ t.amount_cents | eur }}</td>
+        <tr class="border-b border-[#1a1a1a]">
+          <td class="tnum py-2.5 pr-4 text-zinc-500">{{ t.booking_date[8:10] }}.{{ t.booking_date[5:7] }}.</td>
+          <td class="w-full max-w-0 truncate py-2.5 text-white">{{ t.counterparty or '—' }}</td>
+          <td class="hidden py-2.5 pl-4 sm:table-cell"><span class="tag">{{ (t.category or '—')[:22] }}</span></td>
+          <td class="tnum whitespace-nowrap py-2.5 pl-6 text-right {{ 'text-[#f87171]' if t.amount_cents < 0 else 'text-[#60a5fa]' }}">{{ t.amount_cents | eur }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </section>
 </div>
+
+<hr class="perf mt-12">
+<footer class="flex flex-wrap justify-between gap-2 pt-4 text-[10.5px] text-zinc-600">
+  <span>kassensturz — lokale Auswertung, keine Daten verlassen diesen Rechner</span>
+  <span class="tnum">{{ '{:,}'.format(n_tx).replace(',', '.') }} Buchungen · konsolidiertes Hauptbuch</span>
+</footer>
 
 <script>
 // Kontenrundruf: Hintergrund-Lauf (sync → categorize → check) mit Polling;

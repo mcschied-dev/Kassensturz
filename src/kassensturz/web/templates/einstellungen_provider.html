@@ -19,7 +19,7 @@
   {% for v in verbindungen %}
   <section class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
     <div class="flex items-center justify-between">
-      <h2 class="text-sm font-semibold text-white">{{ v.name }}</h2>
+      <h2 class="label">{{ v.name }}</h2>
       <span class="rounded-md bg-white/10 px-2 py-0.5 text-xs font-medium text-zinc-300">{{ v.typ }}</span>
     </div>
     <form method="post" action="/einstellungen/provider/speichern" class="mt-3">
@@ -45,7 +45,7 @@
 </div>
 
 <section class="mt-6 max-w-2xl rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
-  <h2 class="text-sm font-semibold text-white">Neue Verbindung</h2>
+  <h2 class="label">Neue Verbindung</h2>
   <form method="post" action="/einstellungen/provider/anlegen" class="mt-3">
     <label class="block max-w-xs"><span class="text-xs font-medium text-zinc-400">Typ</span>
       <select id="neu-typ" name="typ"
@@ -61,7 +61,7 @@
 </section>
 
 <section class="mt-6 max-w-2xl rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
-  <h2 class="text-sm font-semibold text-white">CSV-Import <span class="font-normal text-zinc-400">(Detail-Quellen ohne API)</span></h2>
+  <h2 class="label">CSV-Import <span class="font-normal text-zinc-400">(Detail-Quellen ohne API)</span></h2>
   <p class="mt-1 text-xs text-zinc-500">PayPal-Aktivitäten und Miles&nbsp;&&nbsp;More-Kartenumsätze kommen per Export-Datei.
     Nach dem Upload laufen Import → Kategorisierung → <code>check</code> automatisch; Re-Uploads sind dank Dedup gefahrlos.</p>
   <div class="mt-3 flex flex-wrap gap-2">

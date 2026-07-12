@@ -103,6 +103,11 @@ def _alle_kategorien(s) -> list[str]:
 def create_app(db_path: Path) -> FastAPI:
     app = FastAPI(title="kassensturz", docs_url=None, redoc_url=None)
     templates = Jinja2Templates(directory=str(TEMPLATES))
+    # Tailwind + ECharts sind gevendort (kein CDN): local-first heißt
+    # offline-fähig und keine Skripte von fremden Hosts (SRI-Problem entfällt)
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/static", StaticFiles(
+        directory=str(Path(__file__).parent / "static")), name="static")
     # Projektordner (rules.yaml) = Startverzeichnis von `kassensturz web`
     projekt = Path.cwd()
     templates.env.filters["eur"] = lambda cents: fmt_eur(int(cents))
@@ -131,7 +136,9 @@ def create_app(db_path: Path) -> FastAPI:
             if origin and urlparse(origin).netloc != host:
                 return PlainTextResponse("Origin-Prüfung fehlgeschlagen",
                                          status_code=403)
-        if request.url.path not in ("/login",) and not logged_in(request):
+        if (request.url.path not in ("/login",)
+                and not request.url.path.startswith("/static/")
+                and not logged_in(request)):
             return RedirectResponse("/login", status_code=303)
         return await call_next(request)
 
@@ -209,6 +216,22 @@ def create_app(db_path: Path) -> FastAPI:
         # typischer Buchungstag (Median der letzten Gehaltsläufe)
         raw = s.setting_get("letzter_rundruf", "")
         letzter_rundruf, letzter_rc = (raw.split("|") + [""])[:2] if raw else ("", "")
+        # Hero-Daten: 12 Monats-Saldi als Balken (Pixel serverseitig skaliert),
+        # Entsparen-Schnitt der letzten 6 vollen Monate, Verträge-Jahreskosten
+        saldi12 = [dict(r) for r in s.conn.execute(
+            f"""SELECT substr(booking_date,1,7) ym, SUM(amount_cents) v
+                FROM transactions
+                WHERE COALESCE(category,'') NOT IN ({neutral})
+                  AND COALESCE(category,'') NOT LIKE '%(Sondereffekt)%'
+                GROUP BY ym ORDER BY ym DESC LIMIT 12""")][::-1]
+        maxv = max((abs(r["v"]) for r in saldi12), default=1) or 1
+        balken = [{"ym": r["ym"], "px": max(1, round(abs(r["v"]) * 88 / maxv)),
+                   "pos": r["v"] >= 0, "offen": r["ym"] == ym}
+                  for r in saldi12]
+        volle = [r["v"] for r in saldi12 if r["ym"] != ym][-6:]
+        schnitt6 = round(sum(volle) / len(volle)) if volle else 0
+        from ..report.build import collect_vertraege
+        vertraege = collect_vertraege(s)
         gehalt_datum, gehalt_tag = None, None
         if gebucht:
             gehalt_datum = s.conn.execute(
@@ -230,6 +253,11 @@ def create_app(db_path: Path) -> FastAPI:
             "gehalt_gebucht": gebucht > 0, "gehalt_summe": gebucht,
             "gehalt_datum": gehalt_datum, "gehalt_tag": gehalt_tag,
             "letzter_rundruf": letzter_rundruf, "letzter_rc": letzter_rc,
+            "balken": balken, "schnitt6": schnitt6,
+            "kosten_jahr": vertraege["kosten_jahr"],
+            "sparen_jahr": vertraege["sparen_jahr"],
+            "n_tx": s.conn.execute(
+                "SELECT COUNT(*) FROM transactions").fetchone()[0],
         })
 
     @app.post("/sync/start")
@@ -454,9 +482,13 @@ def create_app(db_path: Path) -> FastAPI:
         reihenfolge = sorted(
             gruppen.items(),
             key=lambda kv: -sum(x["jahr"] for x in kv[1] if x["aktiv"]))
+        from ..report.xlsx import GRUPPE_SPAREN
+        sparen = sum(a["jahr"] for g, es in reihenfolge if g == GRUPPE_SPAREN
+                     for a in es if a["aktiv"])
+        aktiv_jahr = sum(a["jahr"] for a in abos if a["aktiv"])
         return templates.TemplateResponse(request, "vertraege.html", {
             "aktiv": "vertraege", "gruppen": reihenfolge,
-            "aktiv_jahr": sum(a["jahr"] for a in abos if a["aktiv"]),
+            "kosten_jahr": aktiv_jahr - sparen, "sparen_jahr": sparen,
         })
 
     @app.get("/vertraege/pdf")

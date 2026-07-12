@@ -4,7 +4,7 @@
 <div class="flex flex-wrap items-end justify-between gap-4">
   <div>
     <h1 class="text-xl font-semibold tracking-tight text-white">Buchungen</h1>
-    <p class="mt-1 text-sm text-zinc-400 tnum">{{ '{:,}'.format(n).replace(',', '.') }} Treffer · Summe {{ summe | eur }}</p>
+    <p class="mt-1 text-sm text-zinc-400"><span class="tnum">{{ '{:,}'.format(n).replace(',', '.') }}</span> Treffer · Summe <span class="tnum">{{ summe | eur }}</span></p>
   </div>
 </div>
 
@@ -87,7 +87,7 @@
               {% endfor %}
             </select>
           </form></td>
-        <td class="px-4 py-2.5 text-right font-medium tnum {{ 'text-red-400' if t.amount_cents < 0 else 'text-emerald-400' }}">{{ t.amount_cents | eur }}</td>
+        <td class="px-4 py-2.5 text-right font-medium tnum {{ 'text-red-400' if t.amount_cents < 0 else 'text-[#60a5fa]' }}">{{ t.amount_cents | eur }}</td>
       </tr>
       {% else %}
       <tr><td colspan="5" class="px-4 py-10 text-center text-sm text-zinc-500">

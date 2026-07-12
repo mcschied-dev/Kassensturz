@@ -4,7 +4,7 @@
 <div class="flex flex-wrap items-end justify-between gap-4">
   <div>
     <h1 class="text-xl font-semibold tracking-tight text-white">Verträge & Abos</h1>
-    <p class="mt-1 text-sm text-zinc-400 tnum">Aktive Kosten {{ aktiv_jahr | eur }}/Jahr · automatisch erkannt, Beitragswechsel zusammengeführt</p>
+    <p class="mt-1 text-sm text-zinc-400">Kosten <span class="tnum">{{ kosten_jahr | eur }}</span>/Jahr · Sparpläne <span class="tnum">{{ sparen_jahr | eur }}</span>/Jahr · automatisch erkannt, Beitragswechsel zusammengeführt</p>
   </div>
   <form method="get" action="/vertraege/pdf" class="flex items-center gap-3 text-xs text-zinc-400">
     <label class="flex cursor-pointer items-center gap-1.5">

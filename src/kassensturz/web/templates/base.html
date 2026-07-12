@@ -1,48 +1,70 @@
 <!doctype html>
-<html lang="de" class="h-full bg-zinc-950">
+<html lang="de" class="h-full">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}kassensturz{% endblock %}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  {# gevendort statt CDN — offline-fähig, kein fremder Code; Work Sans
+     kommt lokal installiert (LaTeX-Kanon), Fallback system-ui #}
+  <script src="/static/tailwind.js"></script>
   <style>
-    :root { color-scheme: dark; }
-    body { font-family: 'Work Sans', system-ui, sans-serif; }
-    .tnum { font-variant-numeric: tabular-nums; }
+    /* ── Designsystem „Kontoauszug-Modernismus" (12.07.2026, Referenz midday.ai):
+       fast-schwarzes Monochrom, scharfe Ecken, 1px-Hairlines statt Karten,
+       Mono-Ziffern, Uppercase-Mikro-Labels, gestrichelte Perforation. ── */
+    :root {
+      color-scheme: dark;
+      --bg: #0a0a0a; --ink: #f2f2f2; --ink-2: #8a8a8a; --ink-3: #565656;
+      --line: #232323; --line-soft: #1a1a1a; --feld: #101010;
+      --pos: #60a5fa; --neg: #f87171;
+      --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+    }
+    *, *::before, *::after { border-radius: 0 !important; }
+    html { background: var(--bg); }
+    body { font-family: 'Work Sans', system-ui, sans-serif; color: var(--ink);
+           -webkit-font-smoothing: antialiased; }
+    .tnum { font-family: var(--mono); font-variant-numeric: tabular-nums;
+            letter-spacing: -0.01em; }
+    .label { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+             color: var(--ink-3); font-weight: 500; }
+    .tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+           color: var(--ink-2); border: 1px solid var(--line); padding: 2px 7px;
+           white-space: nowrap; }
+    .perf { border: none; border-top: 1px dashed #333; }
+    /* Alt-Utilities auf das neue System mappen: Karten → transparente
+       Hairline-Panels (der vorhandene ring-white/10 wird zur Kontur) */
+    .bg-zinc-950 { background-color: var(--bg) !important; }
+    .bg-zinc-900 { background-color: transparent !important; }
+    .shadow-sm { box-shadow: none; }
+    .bg-white\/5 { background-color: var(--feld) !important; }
+    .hover\:bg-zinc-950:hover { background-color: #0f0f0f !important; }
+    pre, code { font-family: var(--mono); }
+    input, select, textarea { background-color: var(--feld); }
+    ::placeholder { color: var(--ink-3); }
   </style>
 </head>
-<body class="h-full">
-<div class="flex min-h-full">
-  <aside class="hidden w-56 shrink-0 border-r border-white/10 bg-zinc-900 lg:flex lg:flex-col">
-    <div class="flex h-14 items-center gap-2 px-5 border-b border-white/10">
-      <span class="inline-block h-2.5 w-2.5 rounded-full bg-white"></span>
-      <span class="text-sm font-semibold tracking-tight text-white">kassensturz</span>
-    </div>
-    <nav class="flex flex-1 flex-col gap-0.5 p-3 text-sm">
+<body class="min-h-full">
+<header class="border-b" style="border-color: var(--line)">
+  <div class="mx-auto flex h-14 max-w-[1240px] items-center justify-between px-6 lg:px-10">
+    <a href="/" class="text-xs font-semibold text-white" style="letter-spacing:.22em">KASSENSTURZ</a>
+    <nav class="hidden gap-7 text-[13px] md:flex">
       {% for pfad, key, label in [('/', 'dashboard', 'Dashboard'),
                                    ('/buchungen', 'buchungen', 'Buchungen'),
                                    ('/analyse', 'analyse', 'Analyse'),
-                                   ('/vertraege', 'vertraege', 'Verträge & Abos')] %}
-      <a href="{{ pfad }}"
-         class="rounded-lg px-3 py-2 font-medium {{ 'bg-white/10 text-white' if aktiv == key else 'text-zinc-400 hover:bg-white/5 hover:text-white' }}">
-        {{ label }}</a>
+                                   ('/vertraege', 'vertraege', 'Verträge'),
+                                   ('/einstellungen/kategorien', 'einstellungen', 'Einstellungen')] %}
+      <a href="{{ pfad }}" class="{{ 'font-medium text-white' if aktiv == key else 'text-zinc-400 hover:text-white' }}">{{ label }}</a>
       {% endfor %}
-      <a href="/export/xlsx"
-         class="rounded-lg px-3 py-2 font-medium text-zinc-400 hover:bg-white/5 hover:text-white">Excel exportieren</a>
-      <a href="/einstellungen/kategorien"
-         class="rounded-lg px-3 py-2 font-medium {{ 'bg-white/10 text-white' if aktiv == 'einstellungen' else 'text-zinc-400 hover:bg-white/5 hover:text-white' }}">Einstellungen</a>
+      <a href="/export/xlsx" class="text-zinc-400 hover:text-white">Excel</a>
     </nav>
-    <form method="post" action="/logout" class="p-3 border-t border-white/10">
-      <button class="w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-zinc-400 hover:bg-white/5 hover:text-white">Abmelden</button>
+    <form method="post" action="/logout">
+      <button class="text-[13px] text-zinc-500 hover:text-white">Abmelden</button>
     </form>
-  </aside>
-  <main class="flex-1 min-w-0">
-    <div class="mx-auto max-w-6xl p-6 lg:p-10">
-      {% block content %}{% endblock %}
-    </div>
-  </main>
-</div>
+  </div>
+</header>
+<main>
+  <div class="mx-auto max-w-[1240px] px-6 py-8 lg:px-10">
+    {% block content %}{% endblock %}
+  </div>
+</main>
 </body>
 </html>
