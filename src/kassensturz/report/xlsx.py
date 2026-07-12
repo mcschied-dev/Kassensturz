@@ -799,25 +799,36 @@ def _merge_vertraege(lines: list[dict]) -> list[dict]:
     return out
 
 
+# Mehrere Verträge beim selben Versicherer (HUK: 2× Kfz + Motorrad) tragen
+# die Vertragsnummer im Zweck ("667/865989-L, R-XI 197") — daran splitten,
+# sonst verschmilzt alles zu EINER "unregelmäßig"-Sammelzeile (Marcs
+# HUK-Befund 12.07.2026). Kennzeichen dient als sprechender Namenszusatz.
+_VERTRAG_NR = re.compile(r"\b(\d{2,4}/\d{5,9}(?:-[A-Z0-9])?)\b")
+_KENNZEICHEN = re.compile(
+    r"\b\d{2,4}/\d{5,9}(?:-[A-Z0-9])?\s*,\s*"
+    r"([A-Za-zÄÖÜäöü]{1,3}-[A-Za-z]{1,2}\s?\d{1,4})")
+
+
 def _versicherungen(store: Store, today: date) -> list[dict]:
     """Versicherungen laufen KOMPLETT kategorie-basiert (nicht über die
     Betrags-Gruppierung): Jahresverträge mit Beitragsanpassung (Concordia,
     Rhion, HUK …) haben selten 3× denselben Betrag, und ein frisch
     abgeschlossener Vertrag (Stuttgarter) hat erst eine Zahlung."""
-    groups: dict[tuple[str, str], list] = {}
+    groups: dict[tuple[str, str, str], list] = {}
     for r in _q(
         store,
-        "SELECT counterparty, COALESCE(category,'(unkategorisiert)') c,"
+        "SELECT counterparty, purpose, COALESCE(category,'(unkategorisiert)') c,"
         "       booking_date, amount_cents "
         f"FROM transactions WHERE amount_cents < 0 {_BASE} "
         "AND category LIKE '%ersicherung%' ORDER BY booking_date",
     ):
         key = _abo_key(r["counterparty"])
         if key:
-            groups.setdefault((key, r["c"]), []).append(r)
+            m = _VERTRAG_NR.search(r["purpose"] or "")
+            groups.setdefault((key, r["c"], m.group(1) if m else ""), []).append(r)
 
     lines = []
-    for (key, cat), rows in groups.items():
+    for (key, cat, nr), rows in groups.items():
         dates = [date.fromisoformat(r["booking_date"]) for r in rows]
         gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
         # Einzelzahlung = frischer Vertrag → als Jahresbeitrag annehmen
@@ -833,15 +844,27 @@ def _versicherungen(store: Store, today: date) -> list[dict]:
         if turnus:
             label, jahr = turnus[2], betrag * turnus[3]
         else:
-            # unregelmäßig: Summe der letzten 365 Tage als Jahreskosten
+            # unregelmäßig: der Median-Abstand ist bei gemischten Beträgen
+            # bedeutungslos (Erst-+Folgebeitrag 14 Tage auseinander machten
+            # die HUK R-MS fälschlich "beendet") → festes Jahresfenster+Kulanz
+            aktiv = (today - dates[-1]).days <= 410
+            # Summe der letzten 365 Tage als Jahreskosten
             end = today if aktiv else dates[-1]
             cutoff = end.toordinal() - 365
             jahr = sum(a for a, d in zip(amounts, dates)
                        if cutoff < d.toordinal() <= end.toordinal())
             label = "unregelmäßig"
+        anbieter = _anbieter(rows[-1]["counterparty"])
+        if nr:
+            mk = _KENNZEICHEN.search(rows[-1]["purpose"] or "")
+            anbieter = f"{anbieter} · {mk.group(1) if mk else nr}"
+        elif any(k == key and c == cat and n for (k, c, n) in groups):
+            # Restzahlungen ohne Nummer neben nummerierten Verträgen
+            # (QR-/Sonderzahlungen) ehrlich kennzeichnen statt verschmelzen
+            anbieter = f"{anbieter} · ohne Vertragsnr."
         lines.append({
-            "key": key,
-            "anbieter": _anbieter(rows[-1]["counterparty"]),
+            "key": f"{key}·{nr}" if nr else key,
+            "anbieter": anbieter,
             "kategorie": cat,
             "turnus": label,
             "betrag": betrag,

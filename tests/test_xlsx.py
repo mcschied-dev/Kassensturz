@@ -69,6 +69,41 @@ def test_workbook_sheets_and_consolidation(tmp_path, monkeypatch):
     assert kpis25["Ausgaben"] == -99.94
 
 
+def test_versicherungen_splitten_nach_vertragsnummer():
+    """Mehrere Verträge beim selben Versicherer (HUK: 2× Kfz + Motorrad)
+    dürfen nicht zu einer Sammelzeile verschmelzen — Split über die
+    Vertragsnummer im Zweck, Kennzeichen als Namenszusatz."""
+    store = Store(":memory:")
+    txs = []
+    for jahr in (2024, 2025, 2026):
+        txs.append(tx(booking_date=date(jahr, 5, 23), amount=Decimal("-1832.20"),
+                      counterparty="HUK-COBURG", category="Versicherung",
+                      purpose=f"Kraftfahrt-Versicherung 667/865989-L, R-XI 197, Folgebeitrag {jahr}"))
+        txs.append(tx(booking_date=date(jahr, 3, 1), amount=Decimal("-198.21"),
+                      counterparty="HUK-COBURG", category="Versicherung",
+                      purpose=f"Kraftfahrt-Versicherung 663/158628-B, Gp-M 975 {jahr}"))
+    # Erst- + Folgebeitrag 14 Tage auseinander: Median-Gap darf den
+    # Vertrag nicht "beenden" (unregelmäßig-Zweig → 410-Tage-Fenster)
+    txs.append(tx(booking_date=date(2025, 12, 19), amount=Decimal("-1011.42"),
+                  counterparty="HUK-COBURG", category="Versicherung",
+                  purpose="Kraftfahrt-Versicherung 668/139640-W, R-MS 573, Folgebeitrag"))
+    txs.append(tx(booking_date=date(2026, 1, 2), amount=Decimal("-1011.42"),
+                  counterparty="HUK-COBURG", category="Versicherung",
+                  purpose="Kraftfahrt-Versicherung 668/139640-W, R-MS 573"))
+    store.add(txs)
+
+    huk = [a for a in _detect_abos(store, today=date(2026, 7, 12))
+           if "HUK" in a["anbieter"]]
+    assert len(huk) == 3
+    namen = {a["anbieter"] for a in huk}
+    assert any("R-XI 197" in n for n in namen)
+    assert any("Gp-M 975" in n for n in namen)
+    assert any("R-MS 573" in n for n in namen)
+    assert all(a["aktiv"] for a in huk)
+    rxi = next(a for a in huk if "R-XI" in a["anbieter"])
+    assert rxi["turnus"] == "jährlich" and rxi["jahr"] == 183220
+
+
 def test_abos_merge_namensvarianten_und_finden_jahresversicherungen():
     store = Store(":memory:")
     txs = []
