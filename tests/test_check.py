@@ -155,6 +155,14 @@ def test_spesen_matching_and_grace():
         ]
     )
     assert levels(check_spesen(store, today=date(2026, 7, 1)), "spesen") == ["ok"]
+    # Stufe 2: der Sammelreport deckt den offenen Mercure-Beleg FIFO —
+    # Status "sammel", Rest wandert in den Überhang
+    result = match_spesen(store, today=date(2026, 7, 1))
+    mercure = next(e for e in result["expenses"]
+                   if "Mercure" in e["counterparty"])
+    assert mercure["sammel"] and mercure["matched"] == "2026-05-30"
+    assert result["unmatched_total"] == 0
+    assert result["surplus"] == 400_00 - 333_00
 
 
 def test_monthly_gaps():

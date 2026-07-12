@@ -311,15 +311,23 @@ def _spesen_reimbursements(store: Store) -> list[dict]:
     ]
 
 
+# Sammelreports dürfen ältere Belege decken als Einzel-Erstattungen
+# (Februar-Reports deckten Belege ab 08.11. — ~100 Tage)
+SPESEN_SAMMEL_DAYS = 120
+
+
 def match_spesen(store: Store, today: date | None = None) -> dict:
-    """Greedy Beleg-Matching: gleicher Betrag, Erstattung 0–90 Tage nach
-    der Ausgabe. Sammelreports bleiben als Erstattungs-Überhang stehen und
-    decken rechnerisch die ältesten unmatchten Ausgaben."""
+    """Zweistufiges Matching: (1) Beleg-genau — gleicher Betrag, Erstattung
+    0–90 Tage nach der Ausgabe. (2) Sammelüberweisungen — übrige
+    Erstattungen decken FIFO die ältesten offenen Belege (Emproof begleicht
+    Reports gebündelt); solche Belege gelten als beglichen mit Marker
+    `sammel`. „Offen" ist danach wirklich offen."""
     today = today or date.today()
     expenses = _spesen_candidates(store)
     reimbs = _spesen_reimbursements(store)
     open_reimbs = list(reimbs)
     for e in expenses:
+        e["sammel"] = False
         for r in open_reimbs:
             gap = (date.fromisoformat(r["booking_date"])
                    - date.fromisoformat(e["booking_date"])).days
@@ -329,13 +337,28 @@ def match_spesen(store: Store, today: date | None = None) -> dict:
                 break
         else:
             e["matched"] = None
+    # Stufe 2: Sammel-Zuordnung — jeder übrige Eingang deckt der Reihe
+    # nach die ältesten offenen Belege, die vor ihm liegen, bis er
+    # aufgebraucht ist (Restbudget wandert in den Überhang)
+    surplus = 0
+    for r in sorted(open_reimbs, key=lambda r: r["booking_date"]):
+        budget = r["amount_cents"]
+        rd = date.fromisoformat(r["booking_date"])
+        for e in expenses:
+            if e["matched"] is not None:
+                continue
+            gap = (rd - date.fromisoformat(e["booking_date"])).days
+            if 0 <= gap <= SPESEN_SAMMEL_DAYS and -e["amount_cents"] <= budget:
+                e["matched"] = r["booking_date"]
+                e["sammel"] = True
+                budget += e["amount_cents"]
+        surplus += budget
     unmatched = [
         e for e in expenses
         if e["matched"] is None
         and -e["amount_cents"] >= SPESEN_MIN_CENTS
         and (today - date.fromisoformat(e["booking_date"])).days > SPESEN_GRACE_DAYS
     ]
-    surplus = sum(r["amount_cents"] for r in open_reimbs)  # Sammelreports etc.
     return {
         "expenses": expenses,
         "reimbursed_total": sum(r["amount_cents"] for r in reimbs),

@@ -44,7 +44,7 @@ erstellt am (((d.created|tex))) · Beleg-Matching: gleicher Betrag, Erstattung 0
 Datum & Konto & Beleg & Betrag & Status \\
 \midrule
 ((* for b in d.belege *))
-(((b.booking_date|tex))) & (((b.account|tex))) & (((b.counterparty[:44]|tex))) & (((b.amount_cents|betrag))) & ((* if b.matched *))beglichen (((b.matched|tex)))((* else *))\textbf{offen}((* endif *)) \\
+(((b.booking_date|tex))) & (((b.account|tex))) & (((b.counterparty[:44]|tex))) & (((b.amount_cents|betrag))) & ((* if b.matched and b.sammel *))Sammelüberw. (((b.matched|tex)))((* elif b.matched *))beglichen (((b.matched|tex)))((* else *))\textbf{offen}((* endif *)) \\
 ((* endfor *))
 \midrule
 \textbf{Summe} & & & \textbf{((((0 - d.angefallen) | betrag)))} & (((d.n_offen))) offen \\
@@ -78,9 +78,10 @@ Keine Erstattungen in diesem Monat gebucht.
 
 {\footnotesize
 \textbf{Methodik:} „Beglichen`` = Erstattung mit exakt gleichem Betrag binnen
-90 Tagen nach dem Beleg. „Offene`` Belege können rechnerisch durch
-Sammelreports gedeckt sein (aktueller Überhang: (((d.surplus|eur)))) —
-die Gesamtabstimmung liefert \texttt{kassensturz spesen}.
+90 Tagen nach dem Beleg; „Sammelüberw.`` = per Sammelüberweisung gedeckt
+(FIFO-Zuordnung auf die ältesten offenen Belege, bis 120 Tage).
+Nicht zugeordneter Erstattungs-Überhang aktuell: (((d.surplus|eur))).
+Die Gesamtabstimmung liefert \texttt{kassensturz spesen}.
 Verpflegung unterwegs läuft bewusst nicht als Spesenkandidat (Pauschalen).}
 
 \vfill

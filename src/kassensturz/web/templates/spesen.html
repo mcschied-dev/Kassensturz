@@ -4,7 +4,7 @@
 <div class="flex flex-wrap items-end justify-between gap-4">
   <div>
     <h1 class="text-xl font-semibold tracking-tight text-white">Spesen</h1>
-    <p class="mt-1 text-sm text-zinc-400">Reisebelege vs. Erstattungen · Beleg-Matching: gleicher Betrag, 0–90 Tage</p>
+    <p class="mt-1 text-sm text-zinc-400">Reisebelege vs. Erstattungen · beleggenau (gleicher Betrag, 0–90 Tage) oder per Sammelüberweisung (FIFO)</p>
   </div>
   <div class="flex items-end gap-3">
     <form method="get" action="/spesen">
@@ -33,7 +33,7 @@
   <div class="border-l border-[#232323] p-6">
     <dt class="label">Offen</dt>
     <dd class="tnum mt-2.5 text-[24px] {{ 'text-[#f87171]' if offen > 0 else 'text-white' }}">{{ offen | eur }}</dd>
-    <p class="mt-1.5 text-[11.5px] text-zinc-500">{{ n_offen }} Beleg(e) ohne 1:1-Match</p>
+    <p class="mt-1.5 text-[11.5px] text-zinc-500">{{ n_offen }} Beleg(e) ohne jede Deckung</p>
   </div>
   <div class="border-l border-[#232323] p-6">
     <dt class="label">Erstattungs-Eingänge {{ monat }}</dt>
@@ -54,7 +54,8 @@
           <td class="w-full max-w-0 truncate py-2.5 text-white">{{ b.counterparty or b.purpose }}</td>
           <td class="tnum whitespace-nowrap py-2.5 pl-4 text-right text-white">{{ b.amount_cents | eur }}</td>
           <td class="py-2.5 pl-4 text-right">
-            {% if b.matched %}<span class="tag">beglichen {{ b.matched[8:10] }}.{{ b.matched[5:7] }}.</span>
+            {% if b.matched and b.sammel %}<span class="tag">Sammelüberw. {{ b.matched[8:10] }}.{{ b.matched[5:7] }}.</span>
+            {% elif b.matched %}<span class="tag">beglichen {{ b.matched[8:10] }}.{{ b.matched[5:7] }}.</span>
             {% else %}<span class="tag" style="color:#f87171;border-color:#3f1d1d">offen</span>{% endif %}</td>
         </tr>
         {% else %}
@@ -79,8 +80,9 @@
         {% endfor %}
       </tbody>
     </table>
-    <p class="mt-4 text-[11.5px] text-zinc-600">„Offen" heißt: kein 1:1-Betrags-Match — Sammelreports decken
-      rechnerisch; Verpflegung unterwegs zählt bewusst nicht als Spesenkandidat (Pauschalen).</p>
+    <p class="mt-4 text-[11.5px] text-zinc-600">„Sammelüberw." = per Sammelüberweisung gedeckt (FIFO-Zuordnung,
+      älteste Belege zuerst) · „offen" = weder Einzel- noch Sammel-Deckung · Verpflegung unterwegs zählt
+      bewusst nicht als Spesenkandidat (Pauschalen).</p>
   </section>
 </div>
 {% endblock %}
