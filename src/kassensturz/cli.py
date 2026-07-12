@@ -17,7 +17,8 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from .categorize import apply_rules, load_rules, match_transfers
+from .categorize import (apply_rules, load_rules, match_transfers,
+                         neutralize_funding_legs)
 from .config import DEFAULT_CONFIG, load_config
 from .connectors.csv_import import PROFILES, import_csv
 from .model import fmt_eur
@@ -350,13 +351,230 @@ def categorize(
     store = _store(db)
     ruleset = load_rules(rules)
     n_transfers = match_transfers(store, ruleset) if transfers else 0
+    n_legs = neutralize_funding_legs(store)
     counts = apply_rules(store, ruleset)
     if n_transfers:
         console.print(f"[cyan]{ruleset.transfer_category}[/cyan]: {n_transfers}")
+    if n_legs:
+        console.print(
+            f"[cyan]PayPal-Funding (neutral)[/cyan]: {n_legs} "
+            f"[dim](Zwillings-Abgleich paypal-Detailkonto)[/dim]")
     for cat, n in sorted(counts.items()):
         console.print(f"[cyan]{cat}[/cyan]: {n}")
     remaining = len(store.query(uncategorized=True))
     console.print(f"[dim]{remaining} unkategorisiert[/dim]")
+
+
+@app.command()
+def suggest(
+    min_conf: float = typer.Option(
+        0.5, "--min-conf", help="Nur Vorschläge ab dieser Konfidenz zeigen."
+    ),
+    apply_conf: Optional[float] = typer.Option(
+        None, "--apply",
+        help="Vorschläge ab dieser Konfidenz SETZEN (bewusster Schritt; "
+             "danach `check` fahren und Muster als Regel übernehmen).",
+    ),
+    limit: int = typer.Option(40, "--limit", "-n", help="Max. Zeilen anzeigen."),
+    db: Path = DbOption,
+) -> None:
+    """ML-Kategorievorschläge für unkategorisierte Buchungen (scikit-learn).
+
+    Trainiert auf den bereits kategorisierten Buchungen (Zeichen-n-Gramm-
+    TF-IDF, robust gegen Kartentext-Varianten). Bucht standardmäßig NICHTS —
+    ohne --apply werden nur Vorschläge gezeigt.
+    """
+    from .suggest import apply as apply_suggestions
+    from .suggest import rule_candidates, suggestions
+
+    store = _store(db)
+    items, meta = suggestions(store, min_confidence=min_conf)
+    console.print(
+        f"[dim]Pipeline: {meta['n_hist']} historisch zugeordnet · "
+        f"{meta['n_ml']} per ML ({meta['n_train']} Trainingsbuchungen, "
+        f"{meta['n_classes']} Kategorien, Holdout {meta['accuracy']:.1%})[/dim]"
+    )
+    if not items:
+        console.print("[green]keine Vorschläge über der Schwelle[/green]")
+        return
+
+    table = Table(title=f"Vorschläge ≥ {min_conf:.0%} ({len(items)} gesamt)")
+    table.add_column("Quelle")
+    table.add_column("Konf.", justify="right")
+    table.add_column("Datum")
+    table.add_column("Betrag", justify="right")
+    table.add_column("Empfänger")
+    table.add_column("Vorschlag")
+    for s in items[:limit]:
+        table.add_row(
+            s.source, f"{s.confidence:.0%}", s.booking_date,
+            fmt_eur(s.amount_cents), s.counterparty[:40],
+            f"[cyan]{s.category}[/cyan]",
+        )
+    console.print(table)
+    if len(items) > limit:
+        console.print(f"[dim]… {len(items) - limit} weitere (-n erhöhen)[/dim]")
+
+    if apply_conf is not None:
+        applied = [s for s in items if s.confidence >= apply_conf]
+        n = apply_suggestions(store, items, apply_conf)
+        console.print(
+            f"[green]{n} Kategorien gesetzt (Konfidenz ≥ {apply_conf:.0%}).[/green] "
+            f"Jetzt `kassensturz check` fahren."
+        )
+        cands = rule_candidates(applied)
+        if cands:
+            console.print("[bold]Regel-Kandidaten für rules.yaml "
+                          "(oft bestätigt → deterministisch machen):[/bold]")
+            for key, cat, n in cands[:10]:
+                console.print(f"  [cyan]{cat}[/cyan]: \"{key}\" ({n}×)")
+    else:
+        hist = sum(1 for s in items if s.source != "ml")
+        hi = sum(1 for s in items if s.source == "ml" and s.confidence >= 0.9)
+        console.print(
+            f"[dim]{hist} historische + {hi} ML-Vorschläge ≥ 90 % — anwenden "
+            f"mit `kassensturz suggest --apply 0.9`[/dim]"
+        )
+
+
+@app.command()
+def budget(
+    budget_file: Path = typer.Option(
+        Path("budget.yaml"), "--budget", "-b", exists=True,
+        help="Budget-Definition (Monatsbudgets je Kategorie)."),
+    year: Optional[str] = typer.Option(None, "-y", help="Jahr (default: aktuell)."),
+    month: Optional[int] = typer.Option(None, "-m", help="Monat (default: aktuell)."),
+    db: Path = DbOption,
+) -> None:
+    """Budget vs. Ist (spesenbereinigt): Monat + Jahresverlauf je Kategorie.
+
+    Jahres-/Quartalsposten machen einzelne Monate klumpig — steuere nach
+    der YTD-Spalte.
+    """
+    from datetime import date as _date
+
+    from .budget import report
+
+    today = _date.today()
+    y, m = year or f"{today.year}", month or today.month
+    r = report(_store(db), budget_file, y, m)
+    console.print(
+        f"[dim]Budget gesamt {fmt_eur(r['summe_budget'])}/Monat · Einkommensreferenz "
+        f"{fmt_eur(r['einkommen'])} · Plan-Saldo {fmt_eur(r['plan_saldo'])}/Monat[/dim]"
+    )
+    table = Table(title=f"Budget {r['monat']} (YTD über {r['n_monate']} Monate)")
+    for col, just in (("Kategorie", "left"), ("Budget", "right"),
+                      ("Ist Monat", "right"), ("Δ Monat", "right"),
+                      ("Ist YTD", "right"), ("Δ YTD", "right")):
+        table.add_column(col, justify=just)
+    for z in r["zeilen"]:
+        if not z["budget"] and not z["ytd_ist"]:
+            continue
+        farbe = "red" if z["ytd_delta"] < 0 else "green"
+        table.add_row(
+            z["kategorie"], fmt_eur(z["budget"]), fmt_eur(z["monat_ist"]),
+            fmt_eur(z["monat_delta"]), fmt_eur(z["ytd_ist"]),
+            f"[{farbe}]{fmt_eur(z['ytd_delta'])}[/{farbe}]",
+        )
+    table.add_row(
+        "[bold]GESAMT[/bold]", fmt_eur(r["summe_budget"]),
+        fmt_eur(r["monat_ist"]), fmt_eur(r["summe_budget"] - r["monat_ist"]),
+        fmt_eur(r["ytd_ist"]), fmt_eur(r["ytd_budget"] - r["ytd_ist"]),
+    )
+    console.print(table)
+
+
+@app.command("web-password")
+def web_password_cmd() -> None:
+    """Passwort für die Weboberfläche setzen (Hash in ~/.kassensturz/)."""
+    from .web import auth as web_auth
+
+    pw = typer.prompt("Neues Web-Passwort", hide_input=True,
+                      confirmation_prompt=True)
+    web_auth.set_password(pw)
+    console.print("[green]Web-Passwort gesetzt.[/green]")
+
+
+@app.command()
+def web(
+    host: str = typer.Option("127.0.0.1", help="Bind-Adresse (Docker: 0.0.0.0)."),
+    port: int = typer.Option(8420, help="Port."),
+    db: Path = DbOption,
+) -> None:
+    """Weboberfläche starten (Dashboard, Buchungen mit Filtern, Verträge,
+    XLSX-Export). Login mit dem per `web-password` gesetzten Passwort.
+    """
+    from .web.app import run
+
+    console.print(f"[green]kassensturz Web:[/green] http://{host}:{port}")
+    run(db, host, port)
+
+
+@app.command()
+def konflikte(
+    rules: Path = typer.Option(
+        Path("rules.yaml"), "--rules", "-r", exists=True, help="YAML rule file."),
+    db: Path = DbOption,
+) -> None:
+    """Lern-Loop: Wo widersprechen manuelle Kategorien den Regeln?
+
+    Zeigt Händler, die wiederholt anders kategorisiert wurden, als die
+    Regel es bei neuen Buchungen tun würde — Kandidaten für Regel-Pflege.
+    """
+    from .suggest import regel_konflikte
+
+    funde = regel_konflikte(_store(db), load_rules(rules))
+    if not funde:
+        console.print("[green]Keine Konflikte — Regeln und manuelle "
+                      "Kategorien sind im Einklang.[/green]")
+        return
+    table = Table(title="Regel-Konflikte (Regel gewinnt bei NEUEN Buchungen)")
+    for col in ("Händler", "Regel sagt", "manuell gesetzt", "Fälle"):
+        table.add_column(col)
+    for f in funde:
+        table.add_row(f["haendler"][:40], f["regel"], f["ist"], str(f["n"]))
+    console.print(table)
+    console.print("[dim]Regel anpassen lassen: Claude sagen, welcher "
+                  "Händler künftig in welche Kategorie soll.[/dim]")
+
+
+@app.command()
+def forecast(
+    until: str = typer.Option(None, "--bis", help="Letzter Monat (YYYY-MM, default: Ende nächsten Jahres)."),
+    db: Path = DbOption,
+) -> None:
+    """Monats-Forecast (Saldo) aus eigenen Mustern: stetige Kategorien per
+    6-Monats-Median, klumpige (Versicherung/Steuer/Kfz) saisonal per
+    Vorjahresmonat. Ohne Spesen, Sparpläne, Sondereffekte.
+    """
+    from datetime import date as _date
+
+    from .forecast import _ym_shift, build_forecast
+
+    today = _date.today()
+    last_full = _ym_shift(f"{today.year:04d}-{today.month:02d}", -1)
+    until = until or f"{today.year + 1}-12"
+    f = build_forecast(_store(db), last_full, until)
+
+    table = Table(title=f"Forecast bis {until} (Basis: 12 Monate bis {last_full})")
+    table.add_column("Monat")
+    table.add_column("Saldo", justify="right")
+    table.add_column("kumuliert", justify="right")
+    kum = 0
+    for ym in f["monate"]:
+        kum += f["saldi"][ym]
+        farbe = "red" if f["saldi"][ym] < 0 else "green"
+        table.add_row(ym, f"[{farbe}]{fmt_eur(f['saldi'][ym])}[/{farbe}]",
+                      fmt_eur(kum))
+    console.print(table)
+    j1 = f["monate"][0][:4]
+    for jahr in sorted({ym[:4] for ym in f["monate"]}):
+        s = sum(f["saldi"][ym] for ym in f["monate"] if ym.startswith(jahr))
+        console.print(f"[bold]{jahr}{' (Rest)' if jahr == j1 else ''}: "
+                      f"{fmt_eur(s)}[/bold]")
+    console.print("[dim]Annahmen: Unterhalt läuft unverändert, keine "
+                  "Erhöhungen/Sondereffekte; Details im Workbook-Sheet "
+                  "'Forecast'.[/dim]")
 
 
 @app.command()

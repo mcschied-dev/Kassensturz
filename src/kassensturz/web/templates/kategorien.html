@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Kategorien — kassensturz{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold tracking-tight text-white">Einstellungen · Kategorien</h1>
+<p class="mt-1 text-sm text-zinc-400">Umbenennen wirkt auf alle Buchungen · Löschen setzt Buchungen auf unkategorisiert ·
+  Achtung: rules.yaml und <code>categorize</code> können Kategorien wieder befüllen — Regeln bei Umbenennungen mitziehen.</p>
+
+<nav class="mt-4 flex gap-2 text-sm">
+  <a href="/einstellungen/kategorien" class="rounded-lg bg-white/10 px-3 py-1.5 font-medium text-white ring-1 ring-white/10">Kategorien</a>
+  <a href="/einstellungen/dashboard" class="rounded-lg px-3 py-1.5 font-medium text-zinc-400 ring-1 ring-white/10 hover:bg-white/5">Dashboard</a>
+</nav>
+
+{% if konflikte %}
+<div class="mt-4 rounded-xl bg-amber-500/10 px-4 py-3 text-sm ring-1 ring-amber-500/20">
+  <p class="font-medium text-amber-400">Lern-Hinweis: Deine manuellen Kategorien widersprechen {{ konflikte | length }} Regel(n)</p>
+  <p class="mt-1 text-xs text-amber-400/80">Regeln gewinnen bei neuen Buchungen — diese Muster als Regel-Änderung an Claude geben:</p>
+  <ul class="mt-2 space-y-1 text-xs text-amber-300/90">
+    {% for k in konflikte %}
+    <li class="tnum">„{{ k.haendler[:40] }}“: Regel sagt <b>{{ k.regel }}</b>, du hast {{ k.n }}× <b>{{ k.ist }}</b> gesetzt</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if meldung %}
+<div class="mt-4 rounded-xl bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-400 ring-1 ring-emerald-500/20">{{ meldung }}</div>
+{% endif %}
+
+<form method="post" action="/einstellungen/kategorien/anlegen"
+      class="mt-5 flex items-end gap-2 rounded-2xl bg-zinc-900 p-4 shadow-sm ring-1 ring-white/10">
+  <label class="block grow max-w-sm"><span class="text-xs font-medium text-zinc-400">Neue Kategorie</span>
+    <input name="name" required placeholder="z. B. Hund Lilli"
+           class="mt-1 block w-full rounded-lg border-0 bg-white/5 px-3 py-1.5 text-sm text-white ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-white/60"></label>
+  <button class="rounded-lg bg-white px-4 py-1.5 text-sm font-semibold text-zinc-900 hover:bg-zinc-200">Anlegen</button>
+</form>
+
+<div class="mt-5 overflow-x-auto rounded-2xl bg-zinc-900 shadow-sm ring-1 ring-white/10">
+  <table class="w-full min-w-[560px] text-sm">
+    <thead>
+      <tr class="border-b border-white/10 text-left text-xs font-medium uppercase tracking-wide text-zinc-400">
+        <th class="px-4 py-3">Kategorie</th>
+        <th class="px-4 py-3 text-right">Buchungen</th>
+        <th class="px-4 py-3 text-right">Summe</th>
+        <th class="px-4 py-3 text-right">Aktionen</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-white/5">
+      <tr class="text-zinc-500">
+        <td class="px-4 py-2.5">(unkategorisiert)</td>
+        <td class="px-4 py-2.5 text-right tnum">{{ unkat }}</td>
+        <td class="px-4 py-2.5 text-right">—</td>
+        <td class="px-4 py-2.5 text-right text-xs">per Dropdown in den Buchungen zuweisen</td>
+      </tr>
+      {% for z in zeilen %}
+      {% if loop.first or z.gruppe != loop.previtem.gruppe %}
+      <tr><td colspan="4" class="bg-white/5 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">{{ z.gruppe }}</td></tr>
+      {% endif %}
+      <tr class="hover:bg-zinc-950">
+        <td class="px-4 py-2.5 font-medium text-white">
+          <div class="flex items-center gap-2">
+            <span>{{ z.name }}</span>
+            <form method="post" action="/einstellungen/kategorien/gruppe">
+              <input type="hidden" name="name" value="{{ z.name }}">
+              <select name="gruppe" aria-label="Gruppe ändern" onchange="this.form.submit()"
+                      class="rounded-md border-0 bg-white/5 px-1.5 py-0.5 text-[11px] text-zinc-400 ring-1 ring-inset ring-white/10">
+                {% for g in gruppen_namen %}
+                <option value="{{ g }}" {{ 'selected' if g == z.gruppe }}>{{ g }}</option>
+                {% endfor %}
+              </select>
+            </form>
+          </div>
+        </td>
+        <td class="px-4 py-2.5 text-right text-zinc-400 tnum">
+          <a class="hover:underline" href="/buchungen?kategorie={{ z.name | urlencode }}">{{ z.n }}</a></td>
+        <td class="px-4 py-2.5 text-right tnum {{ 'text-red-400' if z.summe < 0 else 'text-emerald-400' }}">{{ z.summe | eur }}</td>
+        <td class="px-4 py-2.5">
+          <div class="flex items-center justify-end gap-2">
+            <form method="post" action="/einstellungen/kategorien/umbenennen" class="flex items-center gap-1.5">
+              <input type="hidden" name="alt" value="{{ z.name }}">
+              <input name="neu" value="{{ z.name }}" aria-label="Neuer Name" size="18"
+                     class="rounded-md border-0 bg-white/5 px-2 py-1 text-xs text-white ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-white/60">
+              <button class="rounded-md px-2 py-1 text-xs font-medium text-zinc-300 ring-1 ring-white/10 hover:bg-white/5">Umbenennen</button>
+            </form>
+            <form method="post" action="/einstellungen/kategorien/loeschen"
+                  onsubmit="return confirm('„{{ z.name }}“ löschen? {{ z.n }} Buchungen werden unkategorisiert.')">
+              <input type="hidden" name="name" value="{{ z.name }}">
+              <button class="rounded-md px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-red-500/20 hover:bg-red-500/10">Löschen</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

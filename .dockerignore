@@ -1,0 +1,11 @@
+# Echte Daten und lokale Artefakte dürfen NIE ins Image
+csv/
+reports/
+rules.yaml
+budget.yaml
+config.yaml
+*.db
+.venv/
+.git/
+__pycache__/
+tests/

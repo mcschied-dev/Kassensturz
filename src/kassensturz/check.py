@@ -252,6 +252,12 @@ SPESEN_PATTERNS = (
     "bochum", "bremen",
 )
 
+# Verpflegung unterwegs ist PRIVAT (dafür gibt es Pauschalen, keine
+# Einzelbelege — Marc, 11.07.2026); Duty-free am Flughafen ebenso.
+# ("_" = LIKE-Wildcard: trifft Bäckerei/B.ckerei/B?ckerei-Kartentexte)
+SPESEN_EXCLUDE = ("b_ckerei", "baecker", "rewe", "hannelores", "zettle",
+                  "airport retail")
+
 # so lange darf eine Ausgabe unerstattet bleiben, bevor gewarnt wird
 # (Einreichung + Monatsende-Zahllauf)
 SPESEN_GRACE_DAYS = 45
@@ -265,7 +271,11 @@ def _spesen_candidates(store: Store) -> list[dict]:
         "lower(counterparty) LIKE ? OR lower(purpose) LIKE ?"
         for _ in SPESEN_PATTERNS
     )
+    excl = " AND ".join(
+        "lower(counterparty) NOT LIKE ?" for _ in SPESEN_EXCLUDE
+    )
     params = [f"%{p}%" for p in SPESEN_PATTERNS for _ in range(2)]
+    excl_params = [f"%{p}%" for p in SPESEN_EXCLUDE]
     return [
         dict(r)
         for r in store.conn.execute(
@@ -277,8 +287,9 @@ def _spesen_candidates(store: Store) -> list[dict]:
                       ('Umbuchung','Kreditkarten-Abrechnung',
                        'PayPal-Funding (neutral)','Bankgebühren')
                   AND ({like})
+                  AND {excl}
                 ORDER BY booking_date""",
-            [SPESEN_SINCE, *params],
+            [SPESEN_SINCE, *params, *excl_params],
         )
     ]
 
@@ -289,7 +300,7 @@ def _spesen_reimbursements(store: Store) -> list[dict]:
         for r in store.conn.execute(
             """SELECT booking_date, purpose, amount_cents
                FROM transactions
-               WHERE category = 'Spesen-Erstattung (Emproof)' AND amount_cents > 0
+               WHERE category = 'Spesen' AND amount_cents > 0
                ORDER BY booking_date"""
         )
     ]
@@ -348,6 +359,97 @@ def check_spesen(store: Store, today: date | None = None) -> list[Finding]:
         f"{result['surplus']/100:.2f} € ≥ offene {result['unmatched_total']/100:.2f} €)")]
 
 
+# Seit 03/2026 kürzt die DKB PayPal-Kartenbelastungen auf den reinen
+# Händlernamen ("Google" statt "PAYPAL..GOOGLE") — solche Funding-Legs
+# rutschen an der Neutralisierungs-Regel vorbei und zählen doppelt.
+FUNDING_TWIN_SINCE = "2026-03-01"
+FUNDING_TWIN_DAYS = 4
+
+
+def check_paypal_funding_twins(store: Store) -> list[Finding]:
+    """Nicht-neutrale Bankbuchung + PayPal-Zeile mit gleichem Betrag binnen
+    weniger Tage, deren Händlername den Bank-Empfänger enthält = mutmaßlich
+    doppelt gezähltes Funding-Leg → warnen (Kategorie-Fix nötig)."""
+    rows = store.conn.execute(
+        "SELECT d.booking_date dd, d.amount_cents a, d.counterparty dc,"
+        "       p.counterparty pc "
+        "FROM transactions d JOIN transactions p ON p.account = 'paypal' "
+        "  AND p.amount_cents = d.amount_cents "
+        "  AND ABS(julianday(p.booking_date) - julianday(d.booking_date)) <= ? "
+        "WHERE d.account != 'paypal' AND d.amount_cents < 0 "
+        "  AND d.booking_date >= ? "
+        "  AND COALESCE(d.category,'') NOT IN "
+        "      ('PayPal-Funding (neutral)', 'Umbuchung', 'Kreditkarten-Abrechnung')",
+        (FUNDING_TWIN_DAYS, FUNDING_TWIN_SINCE),
+    ).fetchall()
+    suspects = {}
+    for r in rows:
+        # Namensabgleich filtert Zufalls-Zwillinge (Amazon 9,99 ≠ Spotify 9,99)
+        token = r["dc"].lower().split("/")[0].split(",")[0].strip()
+        if token and token in r["pc"].lower():
+            suspects[(r["dd"], r["a"], r["dc"])] = None
+    if suspects:
+        total = -sum(a for _, a, _ in suspects) / 100
+        beispiele = ", ".join(f"{d} {c}" for d, _, c in list(suspects)[:3])
+        return [Finding(
+            "warn", "paypal-funding",
+            f"{len(suspects)} Bankbuchungen sehen wie unneutralisierte "
+            f"PayPal-Funding-Legs aus ({total:.2f} € doppelt gezählt; z. B. "
+            f"{beispiele}) — Kategorie auf 'PayPal-Funding (neutral)' setzen")]
+    return [Finding("ok", "paypal-funding",
+                    "keine doppelt gezählten PayPal-Funding-Legs")]
+
+
+# Gegenrichtung zur Zwillings-Prüfung: eine neutralisierte Zeile OHNE
+# Deckung im paypal-Detailkonto radiert echtes Geld aus dem Cashflow
+# (so verschwanden 2.980 € von Birgits Partnerkarte, Forensik 12.07.2026).
+# Ausgenommen sind PayPals eigene Einzugs-/Kreditzeilen: "Später zahlen"-
+# Raten decken Käufe bis ~1 Monat zuvor (Händlerzeile zählt am Kaufdatum),
+# deshalb das lange Rückschau-Fenster für alles andere.
+NEUTRAL_SETTLEMENT_MARKERS = ("paypal (europe)", "paypal europe",
+                              "spaeter.zahlen", "später zahlen")
+NEUTRAL_TWIN_LOOKBACK_DAYS = 100
+
+
+def check_paypal_neutral_deckung(store: Store) -> list[Finding]:
+    """Jede 'PayPal-Funding (neutral)'-Bankzeile braucht entweder einen
+    betragsgleichen paypal-Zwilling (Kauf bis 100 Tage zuvor, Lastschrift
+    bis 4 Tage danach) oder muss eine PayPal-eigene Sammel-/Kreditzeile
+    sein — sonst wurde vermutlich eine echte Ausgabe neutralisiert."""
+    rows = store.conn.execute(
+        """SELECT d.booking_date dd, d.account acc, d.amount_cents a,
+                  d.counterparty dc, d.purpose dp,
+                  EXISTS (SELECT 1 FROM transactions p
+                          WHERE p.account = 'paypal'
+                            AND p.amount_cents = d.amount_cents
+                            AND julianday(d.booking_date)
+                                - julianday(p.booking_date)
+                                BETWEEN -4 AND ?) AS gedeckt
+           FROM transactions d
+           WHERE d.category = 'PayPal-Funding (neutral)'
+             AND d.account != 'paypal'""",
+        (NEUTRAL_TWIN_LOOKBACK_DAYS,),
+    ).fetchall()
+    offen = [
+        r for r in rows
+        if not r["gedeckt"]
+        and not any(m in (r["dc"] + " " + r["dp"]).lower()
+                    for m in NEUTRAL_SETTLEMENT_MARKERS)
+    ]
+    if offen:
+        total = -sum(r["a"] for r in offen) / 100
+        beispiele = ", ".join(
+            f"{r['dd']} {r['acc']} {r['dc'][:25]}" for r in offen[:3])
+        return [Finding(
+            "warn", "paypal-deckung",
+            f"{len(offen)} neutralisierte Zeilen ohne paypal-Zwilling "
+            f"({total:.2f} € aus dem Cashflow radiert; z. B. {beispiele}) "
+            f"— echte Ausgabe? Kategorie korrigieren")]
+    return [Finding("ok", "paypal-deckung",
+                    f"alle {len(rows)} neutralisierten PayPal-Funding-Zeilen "
+                    f"gedeckt oder PayPal-eigene Einzugszeilen")]
+
+
 def run_all(store: Store, today: date | None = None) -> list[Finding]:
     return [
         *check_balance_reconciliation(store),
@@ -356,4 +458,6 @@ def run_all(store: Store, today: date | None = None) -> list[Finding]:
         *check_uncategorized_income(store),
         *check_monthly_gaps(store),
         *check_spesen(store, today=today),
+        *check_paypal_funding_twins(store),
+        *check_paypal_neutral_deckung(store),
     ]

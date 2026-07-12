@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de" class="h-full bg-zinc-950">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anmelden — kassensturz</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { color-scheme: dark; }body { font-family: 'Work Sans', system-ui, sans-serif; }</style>
+</head>
+<body class="flex min-h-full items-center justify-center p-6">
+  <form method="post" action="/login"
+        class="w-full max-w-sm rounded-2xl bg-zinc-900 p-8 shadow-sm ring-1 ring-white/10">
+    <div class="mb-6 flex items-center gap-2">
+      <span class="inline-block h-2.5 w-2.5 rounded-full bg-white"></span>
+      <h1 class="text-base font-semibold tracking-tight text-white">kassensturz</h1>
+    </div>
+    <label class="block text-sm font-medium text-white" for="password">Passwort</label>
+    <input id="password" name="password" type="password" autofocus required
+           class="mt-2 block w-full rounded-lg border-0 bg-white/5 px-3 py-2 text-sm text-white shadow-sm ring-1 ring-inset ring-white/10 placeholder:text-zinc-500 focus:ring-2 focus:ring-white/60">
+    {% if fehler %}<p class="mt-2 text-sm text-red-400">{{ fehler }}</p>{% endif %}
+    <button class="mt-6 w-full rounded-lg bg-white px-3 py-2 text-sm font-semibold text-zinc-900 hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+      Anmelden</button>
+    <p class="mt-4 text-xs text-zinc-500">Lokale Daten. Kein Konto, ein Passwort — gesetzt per <code>kassensturz web-password</code>.</p>
+  </form>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Verträge & Abos — kassensturz{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold tracking-tight text-white">Verträge & Abos</h1>
+<p class="mt-1 text-sm text-zinc-400 tnum">Aktive Kosten {{ aktiv_jahr | eur }}/Jahr · automatisch erkannt, Beitragswechsel zusammengeführt</p>
+
+{% for gruppe, eintraege in gruppen %}
+<section class="mt-6 rounded-2xl bg-zinc-900 shadow-sm ring-1 ring-white/10">
+  <details {{ 'open' if loop.index <= 2 }}>
+    <summary class="flex cursor-pointer items-center justify-between px-5 py-3 text-sm font-semibold text-white">
+      <span>{{ gruppe }}</span>
+      <span class="font-normal text-zinc-400 tnum">
+        {{ eintraege | selectattr('aktiv') | list | length }} aktiv ·
+        {{ eintraege | selectattr('aktiv') | sum(attribute='jahr') | eur }}/Jahr</span>
+    </summary>
+    <table class="w-full border-t border-white/10 text-sm">
+      <tbody class="divide-y divide-white/5">
+        {% for a in eintraege | sort(attribute='aktiv', reverse=True) %}
+        <tr class="{{ '' if a.aktiv else 'opacity-50' }}">
+          <td class="px-5 py-2.5 font-medium text-white">{{ a.anbieter }}</td>
+          <td class="hidden px-5 py-2.5 text-zinc-400 sm:table-cell">{{ a.kategorie }}</td>
+          <td class="px-5 py-2.5 whitespace-nowrap text-zinc-400">{{ a.turnus }}</td>
+          <td class="px-5 py-2.5 text-right font-medium text-white tnum">{{ a.betrag | eur }}</td>
+          <td class="hidden px-5 py-2.5 text-right text-zinc-400 tnum lg:table-cell">{{ a.jahr | eur }}/J</td>
+          <td class="px-5 py-2.5 text-right">
+            {% if a.aktiv %}<span class="rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400">aktiv</span>
+            {% else %}<span class="rounded-md bg-white/10 px-2 py-0.5 text-xs font-medium text-zinc-400">beendet</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</section>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — kassensturz{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold tracking-tight text-white">Dashboard</h1>
+<p class="mt-1 text-sm text-zinc-400">Konsolidierte Sicht · neutrale Buchungen und Sondereffekte zählen nicht</p>
+
+<dl class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+  <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+    <dt class="text-sm text-zinc-400">Gesamtvermögen</dt>
+    <dd class="mt-1 text-2xl font-semibold tracking-tight text-white tnum">{{ vermoegen | eur }}</dd>
+  </div>
+  <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+    <dt class="text-sm text-zinc-400">Einnahmen {{ ym }}</dt>
+    <dd class="mt-1 text-2xl font-semibold tracking-tight text-white tnum">{{ einnahmen | eur }}</dd>
+    {% if gehalt_datum %}
+    <p class="mt-1 text-xs text-zinc-500 tnum">davon Gehalt {{ gehalt_summe | eur }} · {{ gehalt_datum[8:10] }}.{{ gehalt_datum[5:7] }}.</p>
+    {% elif ausstehend %}
+    <p class="mt-1 text-xs text-zinc-400 tnum">Gehalt {{ ausstehend | eur }} erwartet{% if gehalt_tag %} ~{{ '%02d' % gehalt_tag }}.{{ ym[5:7] }}.{% endif %}</p>
+    {% endif %}
+  </div>
+  <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+    <dt class="text-sm text-zinc-400">Ausgaben {{ ym }}</dt>
+    <dd class="mt-1 text-2xl font-semibold tracking-tight text-white tnum">{{ ausgaben | eur }}</dd>
+  </div>
+  <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+    {% if ausstehend %}
+    <dt class="text-sm text-zinc-400">Saldo {{ ym }} <span class="text-zinc-500">projiziert</span></dt>
+    <dd class="mt-1 text-2xl font-semibold tracking-tight tnum {{ 'text-red-400' if projiziert < 0 else 'text-emerald-400' }}">{{ projiziert | eur }}</dd>
+    <p class="mt-1 text-xs text-zinc-400 tnum">ohne Gehaltslauf {{ saldo | eur }} · ausstehend {{ ausstehend | eur }}
+      <a href="/einstellungen/dashboard" class="text-zinc-500 hover:underline" title="Gehaltslauf einstellen">⚙</a></p>
+    {% else %}
+    <dt class="text-sm text-zinc-400">Saldo {{ ym }}</dt>
+    <dd class="mt-1 text-2xl font-semibold tracking-tight tnum {{ 'text-red-400' if saldo < 0 else 'text-emerald-400' }}">{{ saldo | eur }}</dd>
+    {% if gehalt_gebucht %}
+    <p class="mt-1 text-xs text-zinc-500">Gehaltslauf gebucht ✓</p>
+    {% endif %}
+    {% endif %}
+  </div>
+</dl>
+
+<div class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+  <section class="rounded-2xl bg-zinc-900 shadow-sm ring-1 ring-white/10">
+    <h2 class="border-b border-white/10 px-5 py-3 text-sm font-semibold text-white">Kontostände (letzter Sync)</h2>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-white/5">
+        {% for b in balances %}
+        <tr>
+          <td class="px-5 py-2.5 text-white">{{ b.account }}</td>
+          <td class="px-5 py-2.5 text-right text-zinc-400">{{ b.snapshot_date }}</td>
+          <td class="px-5 py-2.5 text-right font-medium text-white tnum">
+            {{ b.balance_cents | eur }}{% if b.currency != 'EUR' %} <span class="text-zinc-500">{{ b.currency }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="rounded-2xl bg-zinc-900 shadow-sm ring-1 ring-white/10">
+    <h2 class="border-b border-white/10 px-5 py-3 text-sm font-semibold text-white">Letzte Buchungen</h2>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-white/5">
+        {% for t in letzte %}
+        <tr>
+          <td class="px-5 py-2.5 whitespace-nowrap text-zinc-400">{{ t.booking_date }}</td>
+          <td class="w-full max-w-0 truncate px-5 py-2.5 text-white">{{ t.counterparty or '—' }}</td>
+          <td class="px-5 py-2.5 text-right font-medium whitespace-nowrap tnum {{ 'text-red-400' if t.amount_cents < 0 else 'text-emerald-400' }}">{{ t.amount_cents | eur }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}

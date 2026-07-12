@@ -119,7 +119,7 @@ def test_spesen_matching_and_grace():
                 amount=Decimal("220.00"),
                 counterparty="emproof GmbH",
                 purpose="RNr. 110-26030056",
-                category="Spesen-Erstattung (Emproof)",
+                category="Spesen",
             ),
             # vergessener Beleg, älter als Kulanzfrist
             tx(
@@ -150,7 +150,7 @@ def test_spesen_matching_and_grace():
                 amount=Decimal("400.00"),
                 counterparty="emproof GmbH",
                 purpose="Travel Expenses sequenz-id 42",
-                category="Spesen-Erstattung (Emproof)",
+                category="Spesen",
             )
         ]
     )
@@ -171,3 +171,48 @@ def test_monthly_gaps():
     assert "2026-04" in f[0].message
     store.add([tx(account="giro", booking_date=date(2026, 4, 10))])
     assert levels(check_monthly_gaps(store, min_rows=50), "lücken") == ["ok"]
+
+
+def test_paypal_neutral_deckung():
+    from kassensturz.check import check_paypal_neutral_deckung
+    store = Store(":memory:")
+    store.add(
+        [
+            # gedeckt: Später-zahlen-Rate, Kauf 30 Tage früher im paypal-Konto
+            tx(account="dkb-3527", counterparty="PayPal - Später zahlen",
+               amount=Decimal("-461.70"), booking_date=date(2026, 3, 6),
+               category="PayPal-Funding (neutral)"),
+            tx(account="paypal", counterparty="Galaxus Deutschland GmbH",
+               amount=Decimal("-461.70"), booking_date=date(2026, 2, 3)),
+            # exempt: PayPals eigene Einzugszeile (Sammel-Lastschrift)
+            tx(account="ksk-giro", counterparty="PayPal (Europe) S.a r.l.",
+               amount=Decimal("-728.85"), booking_date=date(2024, 11, 14),
+               category="PayPal-Funding (neutral)"),
+        ]
+    )
+    assert levels(check_paypal_neutral_deckung(store), "paypal-deckung") == ["ok"]
+
+    # echte Ausgabe fälschlich neutralisiert (kein Zwilling, Händler-Leg) → warn
+    store.add(
+        [
+            tx(account="mm-birgit", counterparty="Paypal *Ebay De",
+               amount=Decimal("-827.98"), booking_date=date(2021, 11, 10),
+               category="PayPal-Funding (neutral)"),
+        ]
+    )
+    f = check_paypal_neutral_deckung(store)
+    assert levels(f, "paypal-deckung") == ["warn"]
+    assert "827.98" in f[0].message
+
+
+def test_category_log_trigger():
+    store = Store(":memory:")
+    store.add([tx(counterparty="Netflix")])
+    h = store.query()[0]["hash"]
+    store.set_category([h], "Medien")
+    store.set_category([h], "Medien")  # unverändert → kein Log-Eintrag
+    store.set_category([h], "PayPal-Funding (neutral)")
+    log = store.conn.execute(
+        "SELECT alt, neu FROM category_log ORDER BY id").fetchall()
+    assert [(r["alt"], r["neu"]) for r in log] == [
+        (None, "Medien"), ("Medien", "PayPal-Funding (neutral)")]

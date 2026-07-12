@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Buchungen — kassensturz{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="text-xl font-semibold tracking-tight text-white">Buchungen</h1>
+    <p class="mt-1 text-sm text-zinc-400 tnum">{{ '{:,}'.format(n).replace(',', '.') }} Treffer · Summe {{ summe | eur }}</p>
+  </div>
+</div>
+
+<form method="get" class="mt-5 grid grid-cols-2 gap-3 rounded-2xl bg-zinc-900 p-4 shadow-sm ring-1 ring-white/10 sm:grid-cols-3 lg:grid-cols-6">
+  <label class="col-span-2 block sm:col-span-1 lg:col-span-2">
+    <span class="text-xs font-medium text-zinc-400">Suche</span>
+    <input name="q" value="{{ q }}" placeholder="Empfänger oder Zweck"
+           class="mt-1 block w-full rounded-lg border-0 bg-white/5 px-3 py-1.5 text-sm shadow-sm ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-white/60">
+  </label>
+  <label class="block">
+    <span class="text-xs font-medium text-zinc-400">Konto</span>
+    <select name="konto" class="mt-1 block w-full rounded-lg border-0 bg-white/5 px-2 py-1.5 text-sm shadow-sm ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-white/60">
+      <option value="">alle</option>
+      {% for k in konten %}<option value="{{ k }}" {{ 'selected' if k == konto }}>{{ k }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="block">
+    <span class="text-xs font-medium text-zinc-400">Kategorie</span>
+    <select name="kategorie" class="mt-1 block w-full rounded-lg border-0 bg-white/5 px-2 py-1.5 text-sm shadow-sm ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-white/60">
+      <option value="">alle</option>
+      {% for k in kategorien %}<option value="{{ k }}" {{ 'selected' if k == kategorie }}>{{ k }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="block">
+    <span class="text-xs font-medium text-zinc-400">Von</span>
+    <input type="date" name="von" value="{{ von }}"
+           class="mt-1 block w-full rounded-lg border-0 bg-white/5 px-2 py-1.5 text-sm shadow-sm ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-white/60">
+  </label>
+  <label class="block">
+    <span class="text-xs font-medium text-zinc-400">Bis</span>
+    <input type="date" name="bis" value="{{ bis }}"
+           class="mt-1 block w-full rounded-lg border-0 bg-white/5 px-2 py-1.5 text-sm shadow-sm ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-white/60">
+  </label>
+  <div class="col-span-2 flex items-end justify-between gap-2 sm:col-span-3 lg:col-span-6">
+    <span class="flex items-end gap-2">
+      <button class="rounded-lg bg-white px-4 py-1.5 text-sm font-semibold text-zinc-900 hover:bg-zinc-200">Filtern</button>
+      <a href="/buchungen" class="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-white/5">Zurücksetzen</a>
+    </span>
+    <label class="flex cursor-pointer items-center gap-1.5 pb-1.5 text-xs text-zinc-400"
+           title="Umbuchungen, Kreditkarten-Abrechnungen und PayPal-Funding-Legs — Belege der Saldenabstimmung, die Ausgabe zählt auf der aufgelösten Detail-Zeile">
+      <input type="checkbox" name="neutrale" value="1" {{ 'checked' if neutrale }} onchange="this.form.submit()"
+             class="size-3.5 rounded border-white/20 bg-white/5 text-blue-500 focus:ring-white/40">
+      neutrale/technische Buchungen anzeigen</label>
+  </div>
+</form>
+
+<div class="mt-5 overflow-x-auto rounded-2xl bg-zinc-900 shadow-sm ring-1 ring-white/10">
+  <table class="w-full min-w-[640px] text-sm">
+    <thead>
+      <tr class="border-b border-white/10 text-left text-xs font-medium uppercase tracking-wide text-zinc-400">
+        <th class="px-4 py-3">Datum</th>
+        <th class="px-4 py-3">Konto</th>
+        <th class="px-4 py-3">Empfänger / Zweck</th>
+        <th class="px-4 py-3">Kategorie</th>
+        <th class="px-4 py-3 text-right">Betrag</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-white/5">
+      {% for t in rows %}
+      <tr class="hover:bg-zinc-950">
+        <td class="px-4 py-2.5 whitespace-nowrap text-zinc-400 tnum">{{ t.booking_date }}</td>
+        <td class="px-4 py-2.5 whitespace-nowrap text-zinc-400">{{ t.account }}</td>
+        <td class="px-4 py-2.5 max-w-md">
+          <div class="truncate font-medium text-white">{{ t.counterparty or '—' }}</div>
+          <div class="truncate text-xs text-zinc-500">{{ t.purpose }}</div>
+        </td>
+        <td class="px-4 py-2.5 whitespace-nowrap">
+          <form method="post" action="/buchungen/kategorie">
+            <input type="hidden" name="tx_hash" value="{{ t.hash }}">
+            <input type="hidden" name="zurueck" value="{{ request.url.path }}?{{ request.url.query }}">
+            <select name="kategorie" aria-label="Kategorie ändern" onchange="this.form.submit()"
+                    class="max-w-[180px] rounded-md border-0 bg-white/5 px-2 py-1 text-xs font-medium {{ 'text-zinc-300' if t.category else 'text-zinc-500' }} ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-white/60">
+              <option value="" {{ 'selected' if not t.category }}>— unkategorisiert —</option>
+              {% for gruppe, kats in kat_gruppen.items() %}
+              <optgroup label="{{ gruppe }}">
+                {% for k in kats %}
+                <option value="{{ k }}" {{ 'selected' if k == t.category }}>{{ k }}</option>
+                {% endfor %}
+              </optgroup>
+              {% endfor %}
+            </select>
+          </form></td>
+        <td class="px-4 py-2.5 text-right font-medium tnum {{ 'text-red-400' if t.amount_cents < 0 else 'text-emerald-400' }}">{{ t.amount_cents | eur }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="px-4 py-10 text-center text-sm text-zinc-500">
+        Keine Buchungen für diese Filter — Filter lockern oder <a class="underline" href="/buchungen">zurücksetzen</a>.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if seiten > 1 %}
+<nav class="mt-4 flex items-center justify-between text-sm">
+  {% set basis = '/buchungen?q=' ~ q ~ '&konto=' ~ konto ~ '&kategorie=' ~ kategorie ~ '&von=' ~ von ~ '&bis=' ~ bis ~ ('&neutrale=1' if neutrale else '') %}
+  <span class="text-zinc-400">Seite {{ seite }} von {{ seiten }}</span>
+  <span class="flex gap-2">
+    {% if seite > 1 %}<a class="rounded-lg px-3 py-1.5 font-medium text-white ring-1 ring-white/10 hover:bg-white/5" href="{{ basis }}&seite={{ seite - 1 }}">Zurück</a>{% endif %}
+    {% if seite < seiten %}<a class="rounded-lg px-3 py-1.5 font-medium text-white ring-1 ring-white/10 hover:bg-white/5" href="{{ basis }}&seite={{ seite + 1 }}">Weiter</a>{% endif %}
+  </span>
+</nav>
+{% endif %}
+{% endblock %}

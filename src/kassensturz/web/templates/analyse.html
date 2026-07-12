@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+{% block title %}Analyse — kassensturz{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold tracking-tight text-white">Analyse</h1>
+<p class="mt-1 text-sm text-zinc-400">Konsolidiert, Sondereffekte per Checkbox zuschaltbar · Zeitraum unten am Regler aufziehen</p>
+
+<section class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <h2 class="text-sm font-semibold text-white">Einnahmen vs. Ausgaben je Monat</h2>
+    <div class="flex flex-wrap gap-4 text-xs text-zinc-400">
+      <label class="flex cursor-pointer items-center gap-1.5">
+        <input id="cb-sonder" type="checkbox"
+               class="size-3.5 rounded border-white/20 bg-white/5 text-blue-500 focus:ring-white/40">
+        Sondereffekte einrechnen</label>
+      <label class="flex cursor-pointer items-center gap-1.5" title="nutzt die Werte aus dem Kapitalentnahme-Szenario unten">
+        <input id="cb-szenario" type="checkbox"
+               class="size-3.5 rounded border-white/20 bg-white/5 text-blue-500 focus:ring-white/40">
+        Entnahme-Szenario anwenden</label>
+      <label class="flex cursor-pointer items-center gap-1.5" title="nutzt die Zuflüsse aus dem Kapitalzufluss-Szenario unten">
+        <input id="cb-zufluss" type="checkbox"
+               class="size-3.5 rounded border-white/20 bg-white/5 text-blue-500 focus:ring-white/40">
+        Zufluss-Szenario anwenden</label>
+    </div>
+  </div>
+  <p id="ea-hinweis" class="mt-1 hidden text-xs text-zinc-500"></p>
+  <div id="chart-ea" class="mt-2 h-[380px] w-full"></div>
+</section>
+
+<section class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+  <h2 class="text-sm font-semibold text-white">Sparen vs. Entsparen je Monat <span class="font-normal text-zinc-400">(Saldo bereinigt, ohne Sondereffekte)</span></h2>
+  <div id="chart-spar" class="mt-2 h-[300px] w-full"></div>
+  <h2 class="mt-4 text-sm font-semibold text-white">Kumuliert seit 2022 <span class="font-normal text-zinc-400">(vom laufenden Einkommen aus finanziert — der DRACOON-Exit deckt die Lücke)</span></h2>
+  <div id="chart-kum" class="mt-2 h-[180px] w-full"></div>
+</section>
+
+<section id="entnahme" class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <h2 class="text-sm font-semibold text-white">Vermögens-Prognose: Kapitalentnahme <span class="font-normal text-zinc-400">(Forecast-Basis, ohne Kiteworks/Steuererstattung)</span></h2>
+    <form method="get" action="/analyse#entnahme" class="flex flex-wrap items-end gap-2 text-xs">
+      <label class="block"><span class="text-zinc-400">Entnahme €</span>
+        <input name="entnahme" value="{{ '%.0f' % entnahme }}" size="7"
+               class="mt-0.5 block rounded-lg border-0 bg-white/5 px-2 py-1 text-xs text-white ring-1 ring-inset ring-white/10 tnum"></label>
+      <label class="block"><span class="text-zinc-400">Nebenkosten €</span>
+        <input name="kosten" value="{{ '%.0f' % kosten }}" size="5"
+               class="mt-0.5 block rounded-lg border-0 bg-white/5 px-2 py-1 text-xs text-white ring-1 ring-inset ring-white/10 tnum"></label>
+      <label class="block"><span class="text-zinc-400">Wirksam ab</span>
+        <input name="wirksam" value="{{ wirksam }}" size="6"
+               class="mt-0.5 block rounded-lg border-0 bg-white/5 px-2 py-1 text-xs text-white ring-1 ring-inset ring-white/10 tnum"></label>
+      {% for em, eb in ereignisse %}
+      <input type="hidden" name="zufluss" value="{{ '%.0f' % eb }}">
+      <input type="hidden" name="zufluss_ab" value="{{ em }}">
+      {% endfor %}
+      <button class="rounded-lg bg-white px-3 py-1 text-xs font-semibold text-zinc-900 hover:bg-zinc-200">Rechnen</button>
+    </form>
+  </div>
+  <div id="chart-entnahme" class="mt-2 h-[380px] w-full"></div>
+  <p class="mt-2 text-xs text-zinc-500">Annahmen: Abfluss {{ '{:,.0f}'.format(entnahme).replace(',', '.') }} € + {{ '{:,.0f}'.format(kosten).replace(',', '.') }} € Nebenkosten im Monat {{ wirksam }};
+    ab dann entfällt die laufende Zahlung und die Tagesgeld-Zinsen sinken anteilig (~1 % p. a.).
+    Die Referenzlinie „ohne Entnahme" ist hypothetisch.</p>
+</section>
+
+<section id="zufluss" class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <h2 class="text-sm font-semibold text-white">Vermögens-Prognose: Kapitalzuflüsse <span class="font-normal text-zinc-400">(Sondereffekte — Betrag + Stichtag, mehrere möglich)</span></h2>
+    <form method="get" action="/analyse#zufluss" class="flex flex-wrap items-end gap-2 text-xs">
+      <input type="hidden" name="entnahme" value="{{ '%.0f' % entnahme }}">
+      <input type="hidden" name="kosten" value="{{ '%.0f' % kosten }}">
+      <input type="hidden" name="wirksam" value="{{ wirksam }}">
+      <span id="zufluss-zeilen" class="flex flex-wrap items-end gap-2">
+        {% for em, eb in ereignisse %}
+        <span class="flex items-end gap-2">
+          <label class="block"><span class="text-zinc-400">Zufluss €</span>
+            <input name="zufluss" value="{{ '%.0f' % eb }}" size="7"
+                   class="mt-0.5 block rounded-lg border-0 bg-white/5 px-2 py-1 text-xs text-white ring-1 ring-inset ring-white/10 tnum"></label>
+          <label class="block"><span class="text-zinc-400">Stichtag</span>
+            <input name="zufluss_ab" value="{{ em }}" size="6"
+                   class="mt-0.5 block rounded-lg border-0 bg-white/5 px-2 py-1 text-xs text-white ring-1 ring-inset ring-white/10 tnum"></label>
+        </span>
+        {% endfor %}
+      </span>
+      <button type="button" id="zufluss-plus" title="weiteren Zufluss ergänzen"
+              class="rounded-lg px-3 py-1 text-xs font-medium text-zinc-300 ring-1 ring-white/10 hover:bg-white/5">+ weitere</button>
+      <button class="rounded-lg bg-white px-3 py-1 text-xs font-semibold text-zinc-900 hover:bg-zinc-200">Rechnen</button>
+    </form>
+  </div>
+  <div id="chart-zufluss" class="mt-2 h-[380px] w-full"></div>
+  <p class="mt-2 text-xs text-zinc-500">Annahmen: {{ ereignisse | length }} Zufluss/Zuflüsse, gesamt {{ '{:,.0f}'.format(zufluss_summe).replace(',', '.') }} €,
+    jeweils am Stichtag; ab dann wachsen die Tagesgeld-Zinsen anteilig (~1 % p. a., zusammen +{{ '%.2f' % zufluss_zins }} €/Monat bei allen Zuflüssen).
+    Die Referenzlinie „ohne Zuflüsse" ist die normale Forecast-Basis.</p>
+</section>
+
+<section class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+  <h2 class="text-sm font-semibold text-white">Finanzierungs-Rechner <span class="font-normal text-zinc-400">(Miete → Hausfinanzierung · rein lokal, keine Beratung)</span></h2>
+  <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+    {% for id, label, wert, step in [('f-rate', 'Rate €/Monat', 3000, 100),
+                                      ('f-zins', 'Sollzins % p.a.', 3.8, 0.1),
+                                      ('f-tilg', 'Tilgung % p.a.', 2.0, 0.5),
+                                      ('f-ek', 'Eigenkapital €', 150000, 10000),
+                                      ('f-nk', 'Nebenkosten %', 8.6, 0.1)] %}
+    <label class="block"><span class="text-xs font-medium text-zinc-400">{{ label }}</span>
+      <input id="{{ id }}" type="number" value="{{ wert }}" step="{{ step }}"
+             class="mt-1 block w-full rounded-lg border-0 bg-white/5 px-2 py-1.5 text-sm text-white ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-white/60 tnum">
+    </label>
+    {% endfor %}
+  </div>
+  <dl class="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+    {% for id, label in [('f-darlehen', 'Darlehen'), ('f-kaufpreis', 'Kaufpreis inkl. NK'),
+                          ('f-rest10', 'Restschuld nach 10 J.'), ('f-frei', 'Schuldenfrei mit')] %}
+    <div class="rounded-xl bg-white/5 p-3">
+      <dt class="text-xs text-zinc-400">{{ label }}</dt>
+      <dd id="{{ id }}" class="mt-0.5 text-lg font-semibold text-white tnum">—</dd>
+    </div>
+    {% endfor %}
+  </dl>
+  <div id="chart-finanz" class="mt-4 h-[280px] w-full"></div>
+</section>
+
+<section class="mt-6 rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+  <h2 class="text-sm font-semibold text-white">Ausgaben nach Kategorie je Monat <span class="font-normal text-zinc-400">(Top 6 + Übrige)</span></h2>
+  <div id="chart-kat" class="mt-2 h-[380px] w-full"></div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+const MONATE = {{ monate | tojson }};
+const EIN = {{ ein | tojson }};
+const AUS = {{ aus | tojson }};
+const KAT = {{ kat_serien | tojson }};
+const BEREINIGT = {{ bereinigt | tojson }};
+const KUMULIERT = {{ kumuliert | tojson }};
+// Checkbox-Serien: Sondereffekte je Monat (+/−) und das Entnahme-Szenario
+// rückwirkend auf die echte Historie (wegfallende Zahlung, entgangene Zinsen)
+const SONDER_EIN = {{ sonder_ein | tojson }};
+const SONDER_AUS = {{ sonder_aus | tojson }};
+const WEGFALL = {{ wegfall_hist | tojson }};
+const ZINS_DELTA = {{ zins_delta | tojson }};
+const EREIGNISSE = {{ ereignisse | tojson }};   // [[Stichtag, Betrag], …]
+const ZUFLUSS_ZINS = {{ zufluss_zins | tojson }};
+
+const eur = v => v.toLocaleString('de-DE', {style: 'currency', currency: 'EUR', maximumFractionDigits: 0});
+const INK = '#a1a1aa', GRID = 'rgba(255,255,255,0.06)';
+// Kategorien-Palette: validiert gegen zinc-900 (Lightness, CVD, Kontrast)
+const KAT_FARBEN = ['#3b82f6', '#d97706', '#059669', '#8b5cf6', '#db2777', '#0891b2', '#52525b'];
+
+const basis = {
+  backgroundColor: 'transparent',
+  textStyle: { fontFamily: 'Work Sans, system-ui, sans-serif' },
+  grid: { left: 70, right: 16, top: 36, bottom: 64 },
+  xAxis: { type: 'category', data: MONATE, axisLine: { lineStyle: { color: GRID } },
+           axisLabel: { color: INK }, axisTick: { show: false } },
+  yAxis: { type: 'value', splitLine: { lineStyle: { color: GRID } },
+           axisLabel: { color: INK, formatter: v => eur(v) } },
+  dataZoom: [
+    { type: 'slider', height: 22, bottom: 12, borderColor: GRID,
+      backgroundColor: 'rgba(255,255,255,0.03)', fillerColor: 'rgba(255,255,255,0.08)',
+      textStyle: { color: INK },
+      startValue: MONATE[Math.max(0, MONATE.length - 24)] },
+    { type: 'inside' },
+  ],
+  tooltip: {
+    trigger: 'axis', axisPointer: { type: 'cross', label: { show: false } },
+    backgroundColor: '#27272a', borderColor: 'rgba(255,255,255,0.1)',
+    textStyle: { color: '#fafafa' },
+    valueFormatter: v => v == null ? '—' : v.toLocaleString('de-DE', {style: 'currency', currency: 'EUR'}),
+  },
+  legend: { textStyle: { color: INK }, top: 0, icon: 'roundRect' },
+};
+
+// --- Einnahmen vs. Ausgaben + Saldo-Linie (eine €-Achse) ---
+// Checkboxen rechnen die Serien clientseitig um: Sondereffekte kommen
+// oben drauf; das Entnahme-Szenario simuliert die Historie, als wäre die
+// Entnahme längst passiert (laufende Zahlung weg, Zinsen anteilig weg).
+const ea = echarts.init(document.getElementById('chart-ea'));
+function renderEA() {
+  const mitSonder = document.getElementById('cb-sonder').checked;
+  const mitSzenario = document.getElementById('cb-szenario').checked;
+  const mitZufluss = document.getElementById('cb-zufluss').checked;
+  const ein2 = EIN.map((v, i) => Math.round(100 * (v
+    + (mitSonder ? SONDER_EIN[i] : 0)
+    - (mitSzenario ? ZINS_DELTA : 0)
+    + (mitZufluss ? ZUFLUSS_ZINS : 0))) / 100);
+  const aus2 = AUS.map((v, i) => Math.round(100 * (v
+    + (mitSonder ? SONDER_AUS[i] : 0)
+    - (mitSzenario ? WEGFALL[i] : 0))) / 100);
+  const saldo2 = ein2.map((e, i) => Math.round(100 * (e - aus2[i])) / 100);
+  const hinweise = [];
+  if (mitSonder) hinweise.push('inkl. Sondereffekte (Exit, Abfindung)');
+  if (mitSzenario) hinweise.push(`Entnahme rückwirkend: laufende Zahlung entfällt, −${eur(ZINS_DELTA)} Zinsen/Monat`);
+  if (mitZufluss) hinweise.push(`Zuflüsse rückwirkend: +${eur(ZUFLUSS_ZINS)} Zinsen/Monat`);
+  const h = document.getElementById('ea-hinweis');
+  h.textContent = hinweise.join(' · ');
+  h.classList.toggle('hidden', !hinweise.length);
+  ea.setOption({ ...basis, series: [
+    { name: 'Einnahmen', type: 'bar', data: ein2, color: '#3b82f6',
+      barGap: '10%', itemStyle: { borderRadius: [3, 3, 0, 0] } },
+    { name: 'Ausgaben', type: 'bar', data: aus2, color: '#dc2626',
+      itemStyle: { borderRadius: [3, 3, 0, 0] } },
+    { name: 'Saldo', type: 'line', data: saldo2, color: '#e4e4e7',
+      lineStyle: { width: 2 }, symbol: 'circle', symbolSize: 5, z: 3 },
+  ]});
+}
+['cb-sonder', 'cb-szenario', 'cb-zufluss'].forEach(id =>
+  document.getElementById(id).addEventListener('change', renderEA));
+renderEA();
+
+// --- Sparen (blau) / Entsparen (rot); kumulierte Linie separat,
+// weil ±15k-Monate und −490k-Kumuliert nicht auf eine Achse gehören ---
+const spar = echarts.init(document.getElementById('chart-spar'));
+spar.setOption({ ...basis, legend: { show: false },
+  grid: { ...basis.grid, bottom: 56 },
+  series: [{ name: 'Sparen/Entsparen', type: 'bar',
+    data: BEREINIGT.map(v => ({
+      value: v,
+      itemStyle: { color: v >= 0 ? '#3b82f6' : '#dc2626',
+                   borderRadius: v >= 0 ? [3, 3, 0, 0] : [0, 0, 3, 3] },
+    })) }]});
+
+const kum = echarts.init(document.getElementById('chart-kum'));
+kum.setOption({ ...basis, legend: { show: false },
+  grid: { ...basis.grid, top: 12, bottom: 8 },
+  dataZoom: [{ type: 'inside', startValue: basis.dataZoom[0].startValue }],
+  series: [{ name: 'kumuliert', type: 'line', data: KUMULIERT,
+    color: '#e4e4e7', lineStyle: { width: 2 }, symbol: 'none',
+    areaStyle: { color: 'rgba(228,228,231,0.06)' } }]});
+echarts.connect([spar, kum]);  // Zoom/Crosshair laufen synchron
+
+// --- Vermögens-Prognose Kapitalentnahme: zwei Pfade, ein Ereignis ---
+const FC_MONATE = {{ fc_monate | tojson }};
+const BASIS_PFAD = {{ basis_pfad | tojson }};
+const SZEN_PFAD = {{ szen_pfad | tojson }};
+const entnahme = echarts.init(document.getElementById('chart-entnahme'));
+entnahme.setOption({ ...basis,
+  xAxis: { ...basis.xAxis, data: FC_MONATE },
+  dataZoom: [{ type: 'inside' }],
+  yAxis: { ...basis.yAxis, scale: true },
+  series: [
+    { name: 'ohne Entnahme (hypothetisch)', type: 'line', data: BASIS_PFAD,
+      color: '#d97706', lineStyle: { width: 2, type: 'dashed' }, symbol: 'none' },
+    { name: 'mit Entnahme {{ "%.0f" % (entnahme/1000) }}k', type: 'line', data: SZEN_PFAD,
+      color: '#3b82f6', lineStyle: { width: 2 }, symbol: 'none', z: 3,
+      areaStyle: { color: 'rgba(59,130,246,0.06)' },
+      markLine: { symbol: 'none', label: { color: '#a1a1aa', formatter: 'wirksam' },
+                  lineStyle: { color: '#a1a1aa', type: 'dotted' },
+                  data: [{ xAxis: '{{ wirksam }}' }] } },
+  ]});
+
+// --- Vermögens-Prognose Kapitalzuflüsse: Basis vs. mit allen Zuflüssen,
+// je Stichtag eine Markierungslinie ---
+const ZUFLUSS_PFAD = {{ zufluss_pfad | tojson }};
+const zufluss = echarts.init(document.getElementById('chart-zufluss'));
+zufluss.setOption({ ...basis,
+  xAxis: { ...basis.xAxis, data: FC_MONATE },
+  dataZoom: [{ type: 'inside' }],
+  yAxis: { ...basis.yAxis, scale: true },
+  series: [
+    { name: 'ohne Zuflüsse (Forecast-Basis)', type: 'line', data: BASIS_PFAD,
+      color: '#d97706', lineStyle: { width: 2, type: 'dashed' }, symbol: 'none' },
+    { name: 'mit Zuflüssen {{ "%.0f" % (zufluss_summe/1000) }}k', type: 'line', data: ZUFLUSS_PFAD,
+      color: '#3b82f6', lineStyle: { width: 2 }, symbol: 'none', z: 3,
+      areaStyle: { color: 'rgba(59,130,246,0.06)' },
+      markLine: { symbol: 'none',
+                  label: { color: '#a1a1aa', formatter: p => eur(EREIGNISSE[p.dataIndex][1]) },
+                  lineStyle: { color: '#a1a1aa', type: 'dotted' },
+                  data: EREIGNISSE.map(e => ({ xAxis: e[0] })) } },
+  ]});
+
+// „+ weitere": neue Zufluss-Zeile, vorbelegt mit der letzten
+document.getElementById('zufluss-plus').addEventListener('click', () => {
+  const zeilen = document.getElementById('zufluss-zeilen');
+  const letzte = zeilen.lastElementChild;
+  const neu = letzte.cloneNode(true);
+  zeilen.appendChild(neu);
+  neu.querySelector('[name=zufluss]').focus();
+});
+
+// --- Finanzierungs-Rechner: Annuität → Kaufpreis + Restschuld-Verlauf ---
+const finanz = echarts.init(document.getElementById('chart-finanz'));
+const feld = id => parseFloat(document.getElementById(id).value) || 0;
+const eurFmt = v => v.toLocaleString('de-DE', {style: 'currency', currency: 'EUR', maximumFractionDigits: 0});
+
+function rechne() {
+  const rate = feld('f-rate'), zins = feld('f-zins') / 100,
+        tilg = feld('f-tilg') / 100, ek = feld('f-ek'), nk = feld('f-nk') / 100;
+  const darlehen = tilg > 0 ? rate * 12 / (zins + tilg) : 0;
+  const kaufpreis = (darlehen + ek) / (1 + nk);
+  // Restschuld monatlich, bis getilgt oder 40 Jahre
+  let r = darlehen; const verlauf = [r];
+  while (r > 0 && verlauf.length <= 480) {
+    r = r * (1 + zins / 12) - rate;
+    verlauf.push(Math.max(0, r));
+  }
+  const jahre = (verlauf.length - 1) / 12;
+  const startjahr = new Date().getFullYear();
+  document.getElementById('f-darlehen').textContent = eurFmt(darlehen);
+  document.getElementById('f-kaufpreis').textContent = eurFmt(kaufpreis);
+  document.getElementById('f-rest10').textContent = eurFmt(verlauf[Math.min(120, verlauf.length - 1)]);
+  document.getElementById('f-frei').textContent = r <= 0
+    ? `${jahre.toFixed(1)} J. (${Math.round(startjahr + jahre)})` : '> 40 J.';
+  const labels = verlauf.map((_, i) => `${startjahr + Math.floor(i / 12)}`);
+  finanz.setOption({ ...basis, legend: { show: false },
+    grid: { ...basis.grid, top: 20, bottom: 28 }, dataZoom: [],
+    xAxis: { ...basis.xAxis, data: labels,
+             axisLabel: { color: INK, interval: 23 } },
+    series: [{ name: 'Restschuld', type: 'line', data: verlauf.map(v => Math.round(v)),
+      color: '#3b82f6', lineStyle: { width: 2 }, symbol: 'none',
+      areaStyle: { color: 'rgba(59,130,246,0.06)' },
+      markLine: { symbol: 'none',
+        label: { color: '#a1a1aa', formatter: 'Ende Zinsbindung (10 J.)' },
+        lineStyle: { color: '#a1a1aa', type: 'dotted' },
+        data: [{ xAxis: Math.min(120, verlauf.length - 1) }] } }],
+  });
+}
+['f-rate', 'f-zins', 'f-tilg', 'f-ek', 'f-nk'].forEach(id =>
+  document.getElementById(id).addEventListener('input', rechne));
+rechne();
+
+// --- Kategorien gestapelt (2px Fugen zwischen Segmenten) ---
+const kat = echarts.init(document.getElementById('chart-kat'));
+kat.setOption({ ...basis, series: KAT.map((s, i) => ({
+  name: s.name, type: 'bar', stack: 'a', data: s.werte,
+  color: KAT_FARBEN[i] ?? KAT_FARBEN.at(-1),
+  itemStyle: { borderColor: '#18181b', borderWidth: 1 },
+}))});
+
+addEventListener('resize', () => { ea.resize(); spar.resize(); kum.resize(); entnahme.resize(); zufluss.resize(); finanz.resize(); kat.resize(); });
+</script>
+{% endblock %}

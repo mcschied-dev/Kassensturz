@@ -27,6 +27,42 @@ CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(booking_date);
 CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account);
 CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category);
 
+-- Kategorien-Registry: Kategorien entstehen normalerweise durch Regeln/
+-- Buchungen; diese Tabelle hält zusätzlich manuell angelegte (noch leere)
+-- Kategorien, damit sie in Dropdowns auftauchen (Weboberfläche).
+CREATE TABLE IF NOT EXISTS categories (
+  name TEXT PRIMARY KEY,
+  gruppe TEXT
+);
+
+-- Audit-Spur: jede Kategorie-Änderung landet per Trigger hier — egal ob
+-- Web-Dropdown, Regel, ML-Apply oder Hand-SQL. Ohne sie ließ sich beim
+-- PayPal-Funding-Vorfall (12.07.2026) nie klären, WER eine neutralisierte
+-- Zeile zurück auf "Medien" gedreht hatte.
+CREATE TABLE IF NOT EXISTS category_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tx_hash TEXT NOT NULL,
+  alt TEXT,
+  neu TEXT,
+  geaendert_am TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_catlog_hash ON category_log(tx_hash);
+CREATE TRIGGER IF NOT EXISTS trg_category_log
+AFTER UPDATE OF category ON transactions
+WHEN COALESCE(OLD.category, '') != COALESCE(NEW.category, '')
+BEGIN
+  INSERT INTO category_log (tx_hash, alt, neu)
+  VALUES (NEW.hash, OLD.category, NEW.category);
+END;
+
+-- Key-Value-Einstellungen der Weboberfläche (z. B. erwarteter Gehaltslauf
+-- fürs Dashboard) — bewusst in der DB statt einer Datei, damit die Web-UI
+-- (auch im Docker) ohne Dateizugriff schreiben kann.
+CREATE TABLE IF NOT EXISTS einstellungen (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS balances (
   account TEXT NOT NULL,
   snapshot_date TEXT NOT NULL,
@@ -82,6 +118,10 @@ class Store:
         self.conn = sqlite3.connect(str(path))
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        # Migration: gruppe-Spalte für Bestands-DBs (vor 07/2026)
+        cols = [r[1] for r in self.conn.execute("PRAGMA table_info(categories)")]
+        if "gruppe" not in cols:
+            self.conn.execute("ALTER TABLE categories ADD COLUMN gruppe TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -159,6 +199,19 @@ class Store:
             updated += cur.rowcount
         self.conn.commit()
         return updated
+
+    def setting_get(self, key: str, default: str = "") -> str:
+        row = self.conn.execute(
+            "SELECT value FROM einstellungen WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else default
+
+    def setting_set(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO einstellungen (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+        self.conn.commit()
 
     def set_category(self, hashes: list[str], category: str | None) -> int:
         if not hashes:
