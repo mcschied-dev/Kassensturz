@@ -605,6 +605,26 @@ def check(
     console.print("[green]Alle Invarianten halten.[/green]")
 
 
+@app.command()
+def cfo(
+    out: Path = typer.Option(
+        None, "--out", "-o", help="Ziel-PDF (Default: reports/cfo-bericht-<monat>.pdf)."
+    ),
+    db: Path = DbOption,
+) -> None:
+    """CFO-Monatsbericht als PDF: Executive Summary, Vermögensbilanz,
+    Cashflow und die Integritäts-Prüfungen (Family-Office-Dreiklang)."""
+    from datetime import date as _date
+
+    from .report.build import build_pdf, collect_cfo, render_cfo
+
+    store = _store(db)
+    daten = collect_cfo(store)
+    ziel = out or Path("reports") / f"cfo-bericht-{_date.today():%Y-%m}.pdf"
+    pfad = build_pdf(render_cfo(daten), ziel)
+    console.print(f"[green]CFO-Bericht:[/green] {pfad}")
+
+
 @app.command("export-xlsx")
 def export_xlsx_cmd(
     out: Path = typer.Option(

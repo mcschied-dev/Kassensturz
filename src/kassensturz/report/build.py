@@ -321,3 +321,153 @@ def build_pdf(tex_source: str, out_path: Path) -> Path:
             raise RuntimeError(f"latexmk failed:\n{tail}")
         shutil.copy2(pdf, out_path)
     return out_path
+
+
+def collect_cfo(store: Store, today: date | None = None) -> dict:
+    """CFO-Monatsbericht: Executive Summary, Vermögensbilanz, Cashflow,
+    Integritäts-Prüfungen — Family-Office-Dreiklang auf dem Hauptbuch."""
+    import re as _re
+
+    from ..check import run_all
+    today = today or date.today()
+    ym = f"{today:%Y-%m}"
+    monat_de = ("Januar Februar März April Mai Juni Juli August September "
+                "Oktober November Dezember").split()[today.month - 1]
+    neutral = ",".join(f"'{c}'" for c in NEUTRAL_CATEGORIES)
+    basis = (f"COALESCE(category,'') NOT IN ({neutral}) "
+             "AND COALESCE(category,'') NOT LIKE '%(Sondereffekt)%'")
+
+    # Vermögen: Stichtag & Monatsbeginn (rückgerechnet)
+    ende_rows = [b for b in store.latest_balances() if b["currency"] == "EUR"]
+    verm_ende = sum(b["balance_cents"] for b in ende_rows)
+    anfang_map = {r["account"]: r for r in
+                  store.balances_at(f"{ym}-01")}
+    konten, verm_anfang = [], 0
+    for b in sorted(ende_rows, key=lambda x: -x["balance_cents"]):
+        a = anfang_map.get(b["account"])
+        ok = a and a["status"] == "ok"
+        anfang = a["balance_cents"] if ok else b["balance_cents"]
+        verm_anfang += anfang
+        konten.append({
+            "account": b["account"],
+            "hinweis": "" if ok else "nur Saldo-Snapshot",
+            "anfang": anfang, "ende": b["balance_cents"],
+            "delta": b["balance_cents"] - anfang,
+        })
+
+    # Monats-KPIs + 12-Monats-Saldi
+    saldi = [dict(r) for r in store.conn.execute(
+        f"""SELECT substr(booking_date,1,7) ym,
+               SUM(CASE WHEN amount_cents>0 THEN amount_cents ELSE 0 END) ein,
+               SUM(CASE WHEN amount_cents<0 THEN amount_cents ELSE 0 END) aus
+            FROM transactions WHERE {basis}
+            GROUP BY 1 ORDER BY 1 DESC LIMIT 12""")][::-1]
+    maxv = max((abs(r["ein"] + r["aus"]) for r in saldi), default=1) or 1
+    balken = [{"ym": r["ym"], "pos": r["ein"] + r["aus"] >= 0,
+               "mm": max(1, round(abs(r["ein"] + r["aus"]) * 24 / maxv)),
+               "offen": r["ym"] == ym} for r in saldi]
+    m = next((r for r in saldi if r["ym"] == ym), {"ein": 0, "aus": 0})
+    volle = [r for r in saldi if r["ym"] != ym][-6:]
+    ausgaben_avg6 = (round(sum(-r["aus"] for r in volle) / len(volle))
+                     if volle else 0)
+
+    # Gehalts-Projektion (Median der letzten 3 Läufe)
+    kat = store.setting_get("gehalt_kategorie", "Gehalt")
+    roh = store.setting_get("gehalt_erwartet", "").replace(",", ".").strip()
+    try:
+        erwartet = int(round(float(roh) * 100))
+    except ValueError:
+        vals = sorted(r[0] for r in store.conn.execute(
+            """SELECT SUM(amount_cents) FROM transactions
+               WHERE category = ? AND amount_cents > 0
+                 AND substr(booking_date,1,7) < ?
+               GROUP BY substr(booking_date,1,7)
+               ORDER BY substr(booking_date,1,7) DESC LIMIT 3""",
+            (kat, ym)).fetchall())
+        erwartet = vals[len(vals) // 2] if vals else 0
+    gebucht = store.conn.execute(
+        "SELECT COALESCE(SUM(amount_cents),0) FROM transactions "
+        "WHERE category = ? AND amount_cents > 0 "
+        "AND substr(booking_date,1,7) = ?", (kat, ym)).fetchone()[0]
+    ausstehend = erwartet if gebucht == 0 else 0
+    tage = sorted(int(r[0][8:10]) for r in store.conn.execute(
+        "SELECT booking_date FROM transactions WHERE category = ? "
+        "AND amount_cents > 0 ORDER BY booking_date DESC LIMIT 3", (kat,)))
+    gehalt_tag = (f"~{tage[len(tage)//2]:02d}.{today.month:02d}."
+                  if tage and ausstehend else "—")
+
+    # Cashflow-Tabelle (letzte 4 Monate) + Top-Bewegungen
+    cashflow = [{"ym": r["ym"], "ein": r["ein"], "aus": r["aus"],
+                 "saldo": r["ein"] + r["aus"], "offen": r["ym"] == ym}
+                for r in saldi[-4:]]
+    aufl = _re.compile(r"[\w.\- ]*-Auflösung:\s*(.+)$")
+    top = []
+    for r in store.conn.execute(
+            f"""SELECT booking_date, counterparty, purpose, amount_cents
+                FROM transactions WHERE {basis} AND amount_cents < 0
+                AND substr(booking_date,1,7) = ?
+                ORDER BY amount_cents LIMIT 5""", (ym,)):
+        mm_ = aufl.search(r["purpose"] or "")
+        # IBAN-Präfixe der FinTS-Texte verschandeln den Bericht
+        cp = _re.sub(r"^[A-Z]{2}\d{20}", "", r["counterparty"]).strip()
+        text = (f"{mm_.group(1).strip()} · via {cp}" if mm_ else cp)
+        top.append({"datum": f"{r['booking_date'][8:10]}.{r['booking_date'][5:7]}.",
+                    "text": text, "betrag": r["amount_cents"]})
+
+    # Integrität + Quellen + Spesen + Verträge
+    pruefungen = [{"level": f.level, "check": f.check, "message": f.message}
+                  for f in run_all(store, today=today)]
+    quellen = []
+    for r in store.conn.execute(
+            """SELECT account, COUNT(*) n, MIN(booking_date) von,
+                      MAX(booking_date) bis,
+                      GROUP_CONCAT(DISTINCT substr(source,1,instr(source,':')-1)) q
+               FROM transactions GROUP BY account ORDER BY account"""):
+        quellen.append({"account": r["account"], "n": r["n"],
+                        "von": r["von"], "bis": r["bis"],
+                        "quelle": r["q"] or "—"})
+    sp = collect_spesen_monat(store, ym, today=today)
+    v = collect_vertraege(store, today=today)
+    n_monat = store.conn.execute(
+        "SELECT COUNT(*) FROM transactions WHERE substr(booking_date,1,7)=?",
+        (ym,)).fetchone()[0]
+
+    saldo = m["ein"] + m["aus"]
+    warns = [p for p in pruefungen if p["level"] == "warn"]
+    schnitt6 = (round(sum(r["ein"] + r["aus"] for r in volle) / len(volle))
+                if volle else 0)
+    kernaussagen = [
+        f"Monatssaldo projiziert {fmt_eur(saldo + ausstehend)} — der "
+        f"Gehaltslauf ({fmt_eur(erwartet)}) wird {gehalt_tag} erwartet.",
+        f"Durchschnittssaldo der letzten sechs vollen Monate: "
+        f"{fmt_eur(schnitt6)}/Monat.",
+        (f"Größte Einzelbewegung im Monat: {top[0]['text'][:60]} "
+         f"({fmt_eur(top[0]['betrag'])})." if top else
+         "Keine Ausgaben im Berichtsmonat."),
+        ("Alle Integritäts-Prüfungen bestanden — Salden bankbestätigt, "
+         "keine offenen Abstimmungsposten."
+         if not warns else
+         f"{len(warns)} Prüfung(en) mit Warnung — Details Seite 3."),
+    ]
+
+    return {
+        "monat_de": f"{monat_de} {today.year}", "monat_kurz": f"{today.month:02d}/{today.year}",
+        "created": today.strftime("%d.%m.%Y"),
+        "datenstand": max((b["snapshot_date"] for b in ende_rows), default="—"),
+        "verm_ende": verm_ende, "verm_anfang": verm_anfang,
+        "verm_delta": verm_ende - verm_anfang,
+        "n_monat": n_monat, "n_konten": len(ende_rows),
+        "saldo": saldo, "saldo_proj": saldo + ausstehend,
+        "ein_proj": m["ein"] + ausstehend, "ausgaben": -m["aus"],
+        "ausgaben_avg6": ausgaben_avg6, "gehalt_tag": gehalt_tag,
+        "kosten_jahr": v["kosten_jahr"], "sparen_jahr": v["sparen_jahr"],
+        "balken": balken, "kernaussagen": kernaussagen,
+        "konten": konten, "cashflow": cashflow, "top_bewegungen": top,
+        "sp_angefallen": sp["angefallen"], "sp_beglichen": sp["beglichen"],
+        "sp_offen": sp["offen"],
+        "pruefungen": pruefungen, "quellen": quellen,
+    }
+
+
+def render_cfo(data: dict) -> str:
+    return _env().get_template("cfo.tex.j2").render(d=data)

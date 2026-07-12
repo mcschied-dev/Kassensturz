@@ -1,0 +1,196 @@
+% kassensturz — CFO-Bericht (((d.monat_de|tex)))
+\documentclass[10pt,parskip=half-]{scrartcl}
+
+\usepackage{fontspec}
+\usepackage{booktabs}
+\usepackage{ragged2e}
+\usepackage{tikz}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage[ngerman]{babel}
+\usepackage[
+  a4paper,
+  left   = 25mm,
+  right  = 35mm,
+  top    = 22mm,
+  bottom = 24mm,
+]{geometry}
+
+\setmainfont{Work Sans}[
+  UprightFeatures = {RawFeature={axis={wght=400}}},
+  BoldFeatures    = {RawFeature={axis={wght=500}}},
+  AutoFakeSlant   = 0.18,
+  Numbers         = {Monospaced,Lining},
+  Ligatures       = TeX,
+]
+\newfontface\hero{Work Sans}[RawFeature={axis={wght=330}},
+  Numbers={Monospaced,Lining}]
+\newfontface\labelface{Work Sans}[RawFeature={axis={wght=500}},
+  LetterSpace=8, WordSpace=1.3]
+\renewcommand{\familydefault}{\sfdefault}
+
+% Signalfarben wie in der Web-UI, für Druck auf Weiß nachjustiert
+\definecolor{posc}{RGB}{37, 99, 235}
+\definecolor{negc}{RGB}{220, 38, 38}
+\definecolor{ink2}{RGB}{110, 110, 110}
+\definecolor{ink3}{RGB}{160, 160, 160}
+\definecolor{line}{RGB}{200, 200, 200}
+
+\newcommand{\microlabel}[1]{{\labelface\footnotesize\color{ink2}\hyphenpenalty=10000\exhyphenpenalty=10000\MakeUppercase{#1}}}
+\newcommand{\kpi}[3]{% Label, Wert, Unterzeile
+  \begin{minipage}[t]{0.23\textwidth}
+    \microlabel{#1}\\[1.2mm]
+    {\large #2}\\[0.6mm]
+    {\footnotesize\color{ink2}#3}
+  \end{minipage}}
+
+\setkomafont{section}{\normalsize\bfseries}
+\pagestyle{plain}
+\setlength{\parindent}{0pt}
+\setlength{\tabcolsep}{4pt}
+\RaggedRight
+
+\begin{document}
+
+% ───────────────────────────── Seite 1: Executive Summary
+\microlabel{CFO-Bericht · konsolidiertes Hauptbuch}\\[1mm]
+{\LARGE\bfseries (((d.monat_de|tex)))}\hfill{\footnotesize\color{ink2}erstellt (((d.created|tex))) · Datenstand (((d.datenstand|tex)))}
+
+\vspace{7mm}
+\microlabel{Gesamtvermögen zum Stichtag}\\[2mm]
+{\hero\fontsize{34pt}{36pt}\selectfont (((d.verm_ende|eur)))}\quad
+{\color{((( 'posc' if d.verm_delta >= 0 else 'negc' )))}\large ((( '+' if d.verm_delta >= 0 else '' )))(((d.verm_delta|eur)))}
+{\color{ink2}\large ggü. Monatsbeginn}
+
+\vspace{2mm}
+{\footnotesize\color{ink2}Anfangsvermögen (((d.verm_anfang|eur))) · Nettoveränderung durch (((d.n_monat))) Buchungen · (((d.n_konten))) Konten, alle Salden bankbestätigt}
+
+\vspace{8mm}
+\noindent\kpi{Saldo · projiziert}%
+{\color{((( 'posc' if d.saldo_proj >= 0 else 'negc' )))}(((d.saldo_proj|eur)))}%
+{ohne Gehalt (((d.saldo|eur)))}\hfill
+\kpi{Einnahmen · proj.}{(((d.ein_proj|eur)))}{Gehalt erwartet (((d.gehalt_tag|tex)))}\hfill
+\kpi{Ausgaben Monat}{(((d.ausgaben|eur)))}{Ø 6 Monate (((d.ausgaben_avg6|eur)))}\hfill
+\kpi{Verträge p.\,a.}{(((d.kosten_jahr|eur)))}{+ Sparpläne (((d.sparen_jahr|eur)))}
+
+\vspace{9mm}
+\microlabel{Monats-Saldo · letzte 12 Monate (konsolidiert, ohne Sondereffekte)}\\[3mm]
+\begin{tikzpicture}[x=1mm, y=1mm]
+  \draw[color=line, line width=0.4pt] (0,0) -- (142,0);
+  ((* for b in d.balken *))
+  ((* set x0 = loop.index0 * 12 *))
+  ((* if b.pos *))
+  \fill[posc((( ',opacity=0.45' if b.offen else '' )))]
+    ( ((( x0 ))) , 0) rectangle ( ((( x0 + 8 ))) , ((( b.mm ))) );
+  ((* else *))
+  \fill[negc((( ',opacity=0.45' if b.offen else '' )))]
+    ( ((( x0 ))) , ((( 0 - b.mm ))) ) rectangle ( ((( x0 + 8 ))) , 0);
+  ((* endif *))
+  ((* endfor *))
+  \node[color=ink3, font=\scriptsize, anchor=west] at (0, -26) {(((d.balken[0].ym|tex)))};
+  \node[color=ink3, font=\scriptsize, anchor=east] at (142, -26) {(((d.balken[-1].ym|tex))) (offen)};
+\end{tikzpicture}
+
+\vspace{7mm}
+\section*{Kernaussagen}
+\begin{itemize}\setlength\itemsep{0.4mm}
+((* for k in d.kernaussagen *))
+  \item (((k|tex)))
+((* endfor *))
+\end{itemize}
+
+\clearpage
+% ───────────────────────────── Seite 2: Vermögensbilanz & Cashflow
+\section*{Vermögensbilanz}
+{\footnotesize
+\begin{tabular}{@{}l l r r r@{}}
+\toprule
+Konto & & Monatsbeginn & Stichtag & Veränderung \\
+\midrule
+((* for k in d.konten *))
+(((k.account|tex))) & {\color{ink3}(((k.hinweis|tex)))} & (((k.anfang|betrag))) & (((k.ende|betrag))) &
+{\color{((( 'posc' if k.delta >= 0 else 'negc' )))}((( '+' if k.delta >= 0 else '' )))(((k.delta|betrag)))} \\
+((* endfor *))
+\midrule
+\textbf{Gesamt EUR} & & \textbf{(((d.verm_anfang|betrag)))} & \textbf{(((d.verm_ende|betrag)))} &
+\textbf{\color{((( 'posc' if d.verm_delta >= 0 else 'negc' )))}((( '+' if d.verm_delta >= 0 else '' )))(((d.verm_delta|betrag)))} \\
+\bottomrule
+\end{tabular}}
+
+\vspace{8mm}
+\section*{Cashflow der letzten Monate}
+{\footnotesize
+\begin{tabular}{@{}l r r r@{}}
+\toprule
+Monat & Einnahmen & Ausgaben & Saldo \\
+\midrule
+((* for m in d.cashflow *))
+(((m.ym|tex)))((( ' (offen)' if m.offen else '' ))) & (((m.ein|betrag))) & (((m.aus|betrag))) &
+{\color{((( 'posc' if m.saldo >= 0 else 'negc' )))}(((m.saldo|betrag)))} \\
+((* endfor *))
+\bottomrule
+\end{tabular}}
+
+\vspace{8mm}
+\section*{Größte Bewegungen im Berichtsmonat}
+{\footnotesize
+\begin{tabular}{@{}l p{86mm} r@{}}
+\toprule
+Datum & Position & Betrag \\
+\midrule
+((* for t in d.top_bewegungen *))
+(((t.datum|tex))) & (((t.text[:76]|tex))) & {\color{negc}(((t.betrag|betrag)))} \\
+((* endfor *))
+\bottomrule
+\end{tabular}}
+
+\vspace{8mm}
+\section*{Spesen-Abstimmung (((d.monat_kurz|tex)))}
+{\footnotesize Angefallen (((d.sp_angefallen|eur))) · beglichen (((d.sp_beglichen|eur))) ·
+offen (((d.sp_offen|eur))) — offene Belege sind rechnerisch durch Sammelreports gedeckt,
+Detail im Spesen-Reiter.}
+
+\clearpage
+% ───────────────────────────── Seite 3: Integrität & Methodik
+\section*{Datenintegrität — automatisierte Abstimmung}
+{\footnotesize Der Bericht basiert auf einem konsolidierten Hauptbuch; vor Erstellung
+liefen (((d.pruefungen|length))) Invarianten-Prüfungen:}\\[3mm]
+{\footnotesize
+\begin{tabular}{@{}c l p{112mm}@{}}
+\toprule
+ & Prüfung & Ergebnis \\
+\midrule
+((* for p in d.pruefungen *))
+((( '{\\color{posc}\\checkmark}' if p.level == 'ok' else ('{\\color{negc}\\textbf{!}}' if p.level == 'warn' else '{\\color{ink3}·}') ))) &
+(((p.check|tex))) & {\color{((( 'ink2' if p.level != 'warn' else 'negc' )))}(((p.message[:130]|tex)))} \\
+((* endfor *))
+\bottomrule
+\end{tabular}}
+
+\vspace{8mm}
+\section*{Datenquellen und Abdeckung}
+{\footnotesize
+\begin{tabular}{@{}l l r l@{}}
+\toprule
+Konto & Quelle & Buchungen & Zeitraum \\
+\midrule
+((* for q in d.quellen *))
+(((q.account|tex))) & (((q.quelle|tex))) & (((q.n))) & (((q.von|tex))) — (((q.bis|tex))) \\
+((* endfor *))
+\bottomrule
+\end{tabular}}
+
+\vspace{8mm}
+{\footnotesize
+\textbf{Methodik:} Konsolidiertes Hauptbuch — Detail-Quellen (PayPal, Kreditkarte)
+zählen händlergenau, Bank-Sammelbuchungen sind neutralisiert; jeder Euro zählt genau
+einmal. Einnahmen/Ausgaben nach Kategorie-Netto (Retouren mindern ihre Kategorie),
+Sondereffekte und interne Umbuchungen sind ausgeklammert. Saldo-Projektion = Ist
+zuzüglich des erwarteten Gehaltslaufs (Median der letzten Läufe). Beträge in EUR,
+tabellarische Ziffern. Die Datenbank ist Analysewerkzeug, kein Beweismittel —
+Quell-Exporte werden archiviert, alle Importe sind idempotent reproduzierbar.}
+
+\vfill
+{\footnotesize\color{ink2}kassensturz — lokale Auswertung, keine Daten verlassen diesen Rechner. Seite \thepage.}
+
+\end{document}

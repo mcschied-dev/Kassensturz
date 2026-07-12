@@ -183,3 +183,32 @@ def test_spesen_monatsbericht_daten_und_rendering():
     tex = render_spesen(d)
     assert "\\documentclass" in tex and "Stayery Bochum" in tex
     assert "beglichen" in tex and "offen" in tex
+
+
+def test_cfo_bericht_daten_und_rendering():
+    from datetime import date
+    from decimal import Decimal
+
+    from kassensturz.model import Transaction
+    from kassensturz.report.build import collect_cfo, render_cfo
+    from kassensturz.store import Store
+
+    store = Store(":memory:")
+    store.add([
+        Transaction(booking_date=date(2026, 6, 28), amount=Decimal("3000.00"),
+                    currency="EUR", account="giro", counterparty="AG GmbH",
+                    purpose="Gehalt", category="Gehalt"),
+        Transaction(booking_date=date(2026, 7, 2), amount=Decimal("-500.00"),
+                    currency="EUR", account="giro",
+                    counterparty="DE00123456780000000000Vermieter AG",
+                    purpose="Miete", category="Wohnen & Nebenkosten"),
+    ])
+    store.record_balances([("giro", "2026-07-10", 250000, "EUR", "t")])
+    d = collect_cfo(store, today=date(2026, 7, 12))
+    assert d["verm_ende"] == 250000
+    assert d["ausgaben"] == 50000
+    assert len(d["kernaussagen"]) == 4
+    tex = render_cfo(d)
+    assert "CFO-Bericht" in tex and "Vermögensbilanz" in tex
+    assert "Vermieter AG" in tex and "DE0012345678" not in tex  # IBAN weg
+    assert "Datenintegrität" in tex
