@@ -44,6 +44,9 @@ def test_login_und_seiten(client):
     b = client.get("/buchungen", params={"q": "REWE"})
     assert b.status_code == 200
     assert "REWE Regensburg" in b.text
+    # Detail-Hover: Zeilen tragen den vollen Datensatz, Panel + JS vorhanden
+    assert 'class="js-detail' in b.text and 'data-zweck="Einkauf"' in b.text
+    assert 'id="detail-tip"' in b.text
     leer = client.get("/buchungen", params={"q": "gibtsnicht"})
     assert "Keine Buchungen" in leer.text
     assert client.get("/vertraege").status_code == 200

@@ -65,7 +65,12 @@
     </thead>
     <tbody class="divide-y divide-white/5">
       {% for t in rows %}
-      <tr class="hover:bg-zinc-950">
+      <tr class="js-detail hover:bg-zinc-950"
+          data-datum="{{ t.booking_date }}" data-wert="{{ t.value_date or '' }}"
+          data-konto="{{ t.account }}" data-empf="{{ t.counterparty }}"
+          data-zweck="{{ t.purpose }}" data-kat="{{ t.category or '(unkategorisiert)' }}"
+          data-betrag="{{ t.amount_cents | eur }}" data-typ="{{ t.booking_type }}"
+          data-quelle="{{ t.source }}">
         <td class="px-4 py-2.5 whitespace-nowrap text-zinc-400 tnum">{{ t.booking_date }}</td>
         <td class="px-4 py-2.5 whitespace-nowrap text-zinc-400">{{ t.account }}</td>
         <td class="px-4 py-2.5 max-w-md">
@@ -125,4 +130,55 @@
   </span>
 </nav>
 {% endif %}
+<div id="detail-tip" class="pointer-events-none fixed z-50 hidden w-[380px] border border-[#2c2c2c] bg-[#141414] p-4 text-[12px] leading-relaxed shadow-xl"></div>
+
+<script>
+// Detail-Hover: schwebendes Panel mit dem vollen Buchungssatz —
+// Aufbau über textContent (nie innerHTML mit Daten), Position folgt
+// der Maus und klappt am Viewport-Rand um
+const tip = document.getElementById('detail-tip');
+const FELDER = [
+  ['Datum', 'datum'], ['Wertstellung', 'wert'], ['Konto', 'konto'],
+  ['Empfänger', 'empf'], ['Verwendungszweck', 'zweck'],
+  ['Kategorie', 'kat'], ['Buchungstyp', 'typ'], ['Quelle', 'quelle'],
+  ['Betrag', 'betrag'],
+];
+
+function baueTip(d) {
+  tip.replaceChildren();
+  for (const [label, key] of FELDER) {
+    if (!d[key]) continue;
+    const z = document.createElement('div');
+    z.className = 'mb-1.5';
+    const l = document.createElement('div');
+    l.className = 'label';
+    l.textContent = label;
+    const w = document.createElement('div');
+    w.className = ['datum', 'wert', 'betrag'].includes(key)
+      ? 'tnum text-white' : 'break-words text-zinc-300';
+    w.textContent = d[key];
+    z.append(l, w);
+    tip.appendChild(z);
+  }
+}
+
+function platziere(e) {
+  const b = 380, h = tip.offsetHeight || 200;
+  let x = e.clientX + 18, y = e.clientY + 14;
+  if (x + b > innerWidth - 12) x = e.clientX - b - 18;
+  if (y + h > innerHeight - 12) y = innerHeight - h - 12;
+  tip.style.left = `${Math.max(8, x)}px`;
+  tip.style.top = `${Math.max(8, y)}px`;
+}
+
+document.querySelectorAll('tr.js-detail').forEach(tr => {
+  tr.addEventListener('mouseenter', e => {
+    baueTip(tr.dataset);
+    tip.classList.remove('hidden');
+    platziere(e);
+  });
+  tr.addEventListener('mousemove', platziere);
+  tr.addEventListener('mouseleave', () => tip.classList.add('hidden'));
+});
+</script>
 {% endblock %}

@@ -340,8 +340,9 @@ def create_app(db_path: Path) -> FastAPI:
             f"SELECT COUNT(*) n, COALESCE(SUM(amount_cents),0) s "
             f"FROM transactions WHERE {where}", params).fetchone()
         rows = s.conn.execute(
-            f"SELECT hash, booking_date, account, counterparty, purpose, "
-            f"category, amount_cents FROM transactions WHERE {where} "
+            f"SELECT hash, booking_date, value_date, account, counterparty, "
+            f"purpose, category, amount_cents, booking_type, source "
+            f"FROM transactions WHERE {where} "
             "ORDER BY booking_date DESC, rowid DESC LIMIT ? OFFSET ?",
             [*params, PAGE_SIZE, (seite - 1) * PAGE_SIZE]).fetchall()
         konten = [r[0] for r in s.conn.execute(
