@@ -9,12 +9,17 @@ Start: `kassensturz web` oder Docker (siehe Dockerfile).
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import tempfile
-from datetime import date
+import threading
+from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import FastAPI, Form, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import FastAPI, File, Form, Query, Request, UploadFile
+from fastapi.responses import (FileResponse, HTMLResponse,
+                               PlainTextResponse, RedirectResponse)
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
@@ -26,6 +31,42 @@ TEMPLATES = Path(__file__).parent / "templates"
 PAGE_SIZE = 100
 
 NEUTRAL = ("Umbuchung", "Kreditkarten-Abrechnung", "PayPal-Funding (neutral)")
+
+
+# Kontenrundruf aus dem Dashboard: läuft als Hintergrund-Thread über die
+# CLI (gleicher Code-Pfad wie das Terminal — Keychain, Trust-State,
+# DKB-App-Freigabe). Ein Lauf zur Zeit; Status wird vom Dashboard gepollt.
+SYNC_STATE: dict = {"running": False, "rc": None, "fertig": None, "log": ""}
+_SYNC_LOCK = threading.Lock()
+_SYNC_LOG_MAX = 6_000
+
+
+def _sync_worker(db_path: Path, projekt: Path) -> None:
+    ks = Path(sys.executable).parent / "kassensturz"
+    schritte = [["sync"]]
+    if (projekt / "rules.yaml").exists():
+        schritte.append(["categorize", "--rules", "rules.yaml"])
+    schritte.append(["check"])
+    rc = 0
+    try:
+        for args in schritte:
+            SYNC_STATE["log"] += f"\n$ kassensturz {' '.join(args)}\n"
+            p = subprocess.run(
+                [str(ks), *args, "--db", str(db_path)],
+                cwd=projekt, capture_output=True, text=True, timeout=900)
+            SYNC_STATE["log"] = (SYNC_STATE["log"] + p.stdout
+                                 + (p.stderr if p.returncode else "")
+                                 )[-_SYNC_LOG_MAX:]
+            rc = p.returncode  # der letzte Schritt ist `check` → Invarianten
+    except Exception as e:  # Timeout, fehlendes Binary, …
+        SYNC_STATE["log"] = (SYNC_STATE["log"] + f"\nFEHLER: {e}")[-_SYNC_LOG_MAX:]
+        rc = 1
+    fertig = datetime.now().strftime("%d.%m.%Y %H:%M")
+    SYNC_STATE.update(running=False, rc=rc, fertig=fertig)
+    try:  # letzter Lauf übersteht Neustarts (Dashboard-Anzeige)
+        Store(db_path).setting_set("letzter_rundruf", f"{fertig}|{rc}")
+    except Exception:
+        pass
 
 
 def _gehalt_einstellungen(s, ym: str) -> tuple[str, int]:
@@ -61,6 +102,8 @@ def _alle_kategorien(s) -> list[str]:
 def create_app(db_path: Path) -> FastAPI:
     app = FastAPI(title="kassensturz", docs_url=None, redoc_url=None)
     templates = Jinja2Templates(directory=str(TEMPLATES))
+    # Projektordner (rules.yaml) = Startverzeichnis von `kassensturz web`
+    projekt = Path.cwd()
     templates.env.filters["eur"] = lambda cents: fmt_eur(int(cents))
     signer = URLSafeSerializer(auth.secret_key(), salt="session")
 
@@ -138,6 +181,8 @@ def create_app(db_path: Path) -> FastAPI:
         saldo = monat["ein"] + monat["aus"]
         # Zuflussdatum fürs Gehalt: gebucht → echtes Datum; ausstehend →
         # typischer Buchungstag (Median der letzten Gehaltsläufe)
+        raw = s.setting_get("letzter_rundruf", "")
+        letzter_rundruf, letzter_rc = (raw.split("|") + [""])[:2] if raw else ("", "")
         gehalt_datum, gehalt_tag = None, None
         if gebucht:
             gehalt_datum = s.conn.execute(
@@ -158,7 +203,22 @@ def create_app(db_path: Path) -> FastAPI:
             "ausstehend": ausstehend, "projiziert": saldo + ausstehend,
             "gehalt_gebucht": gebucht > 0, "gehalt_summe": gebucht,
             "gehalt_datum": gehalt_datum, "gehalt_tag": gehalt_tag,
+            "letzter_rundruf": letzter_rundruf, "letzter_rc": letzter_rc,
         })
+
+    @app.post("/sync/start")
+    async def sync_start():
+        with _SYNC_LOCK:
+            if SYNC_STATE["running"]:
+                return {"running": True, "hinweis": "läuft bereits"}
+            SYNC_STATE.update(running=True, rc=None, log="")
+        threading.Thread(target=_sync_worker, args=(db_path, projekt),
+                         daemon=True).start()
+        return {"running": True}
+
+    @app.get("/sync/status")
+    async def sync_status():
+        return {k: SYNC_STATE[k] for k in ("running", "rc", "fertig", "log")}
 
     @app.get("/buchungen", response_class=HTMLResponse)
     async def buchungen(request: Request, q: str = "", konto: str = "",
@@ -373,6 +433,25 @@ def create_app(db_path: Path) -> FastAPI:
             "aktiv_jahr": sum(a["jahr"] for a in abos if a["aktiv"]),
         })
 
+    @app.get("/vertraege/pdf")
+    async def vertraege_pdf(inaktive: int = 0):
+        from ..report.build import (build_pdf, collect_vertraege,
+                                    render_vertraege)
+        s = store()
+        data = collect_vertraege(s, mit_inaktiven=bool(inaktive))
+        try:
+            pdf = build_pdf(
+                render_vertraege(data),
+                Path(tempfile.mkdtemp(prefix="kassensturz-")) / "vertraege.pdf")
+        except RuntimeError as e:
+            # kein TeX (z. B. Docker-Image) oder Kompilierfehler —
+            # klare Meldung statt 500er-Traceback
+            return PlainTextResponse(f"PDF-Erzeugung fehlgeschlagen: {e}",
+                                     status_code=503)
+        return FileResponse(
+            pdf, media_type="application/pdf",
+            filename=f"vertraege-{date.today()}.pdf")
+
     @app.post("/buchungen/kategorie")
     async def kategorie_setzen(tx_hash: str = Form(...),
                                kategorie: str = Form(""),
@@ -428,6 +507,84 @@ def create_app(db_path: Path) -> FastAPI:
                 "kategorien": [k for k in _alle_kategorien(s)
                                if k != "(unkategorisiert)"],
             })
+
+    @app.get("/einstellungen/provider", response_class=HTMLResponse)
+    async def provider_seite(request: Request, meldung: str = "",
+                             fehler: str = ""):
+        from . import providercfg
+        from ..connectors.csv_import import PROFILES
+        return templates.TemplateResponse(
+            request, "einstellungen_provider.html", {
+                "aktiv": "einstellungen", "meldung": meldung,
+                "fehler": fehler, "verbindungen": providercfg.liste(),
+                "typen": providercfg.TYPEN, "vorlagen": providercfg.VORLAGEN,
+                "pfad": str(providercfg.config_pfad()),
+                "csv_profile": sorted(PROFILES),
+            })
+
+    def _provider_redirect(fehler: str | None):
+        ziel = ("/einstellungen/provider?fehler=" + quote(fehler)
+                if fehler else "/einstellungen/provider?meldung=Gespeichert.")
+        return RedirectResponse(ziel, status_code=303)
+
+    @app.post("/einstellungen/provider/speichern")
+    async def provider_speichern(typ: str = Form(...), name: str = Form(...),
+                                 text: str = Form(...)):
+        from . import providercfg
+        return _provider_redirect(providercfg.speichern(typ, name, text))
+
+    @app.post("/einstellungen/provider/loeschen")
+    async def provider_loeschen(typ: str = Form(...), name: str = Form(...)):
+        from . import providercfg
+        return _provider_redirect(providercfg.loeschen(typ, name))
+
+    @app.post("/einstellungen/provider/anlegen")
+    async def provider_anlegen(typ: str = Form(...), text: str = Form(...)):
+        from . import providercfg
+        return _provider_redirect(providercfg.anlegen(typ, text))
+
+    @app.post("/einstellungen/provider/upload")
+    async def provider_upload(datei: UploadFile = File(...),
+                              profil: str = Form(...),
+                              konto: str = Form(...)):
+        """CSV-Detail-Quellen (PayPal, Miles&More …): Datei → csv/ →
+        Import → Kategorisierung → check, wie der CLI-Workflow."""
+        from ..connectors.csv_import import PROFILES, import_csv
+        if profil not in PROFILES:
+            return _provider_redirect(f"unbekanntes Profil '{profil}'")
+        if not konto.strip():
+            return _provider_redirect("Konto-Label fehlt")
+        name = Path(datei.filename or "upload.csv").name
+        if not name.lower().endswith(".csv"):
+            return _provider_redirect(f"'{name}': nur .csv-Dateien")
+        ziel = projekt / "csv" / f"upload_{date.today()}_{name}"
+        ziel.parent.mkdir(exist_ok=True)
+        ziel.write_bytes(await datei.read())
+        s = store()
+        try:
+            neu, dubletten = s.add(import_csv(ziel, profil, konto.strip()))
+        except Exception as e:
+            return _provider_redirect(f"Import fehlgeschlagen ({name}): {e}")
+        from ..categorize import (apply_rules, load_rules, match_transfers,
+                                  neutralize_funding_legs)
+        n_kat = 0
+        if (projekt / "rules.yaml").exists():
+            ruleset = load_rules(projekt / "rules.yaml")
+            n_kat += match_transfers(s, ruleset)
+            n_kat += neutralize_funding_legs(s)
+            n_kat += sum(apply_rules(s, ruleset).values())
+        else:
+            n_kat += neutralize_funding_legs(s)
+        from ..check import run_all
+        warnungen = [f for f in run_all(s) if f.level == "warn"]
+        meldung = (f"{name}: {neu} neu, {dubletten} Duplikate, "
+                   f"{n_kat} kategorisiert · "
+                   + ("check: Alle Invarianten halten ✓" if not warnungen
+                      else f"⚠ {len(warnungen)} check-Warnung(en), z. B.: "
+                           f"{warnungen[0].message[:140]}"))
+        return RedirectResponse(
+            "/einstellungen/provider?meldung=" + quote(meldung),
+            status_code=303)
 
     @app.post("/einstellungen/dashboard")
     async def dashboard_einstellungen_speichern(

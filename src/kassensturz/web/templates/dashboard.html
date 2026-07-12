@@ -1,8 +1,24 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — kassensturz{% endblock %}
 {% block content %}
-<h1 class="text-xl font-semibold tracking-tight text-white">Dashboard</h1>
-<p class="mt-1 text-sm text-zinc-400">Konsolidierte Sicht · neutrale Buchungen und Sondereffekte zählen nicht</p>
+<div class="flex flex-wrap items-start justify-between gap-4">
+  <div>
+    <h1 class="text-xl font-semibold tracking-tight text-white">Dashboard</h1>
+    <p class="mt-1 text-sm text-zinc-400">Konsolidierte Sicht · neutrale Buchungen und Sondereffekte zählen nicht</p>
+  </div>
+  <div class="text-right">
+    <button id="sync-btn" title="Alle 4 Banken abrufen — DKB-Freigabe am iPhone nötig"
+            class="rounded-lg bg-white px-4 py-1.5 text-sm font-semibold text-zinc-900 hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-50">
+      Kontenrundruf</button>
+    <p id="sync-status" class="mt-1 text-xs text-zinc-500 tnum">
+      {%- if letzter_rundruf %}zuletzt {{ letzter_rundruf }} {{ '✓' if letzter_rc == '0' else '⚠' }}{% endif -%}
+    </p>
+    <details id="sync-log-box" class="mt-1 hidden text-left">
+      <summary class="cursor-pointer text-xs text-zinc-500">Protokoll</summary>
+      <pre id="sync-log" class="mt-1 max-h-48 max-w-md overflow-auto rounded-lg bg-zinc-950 p-3 text-[11px] leading-relaxed text-zinc-400"></pre>
+    </details>
+  </div>
+</div>
 
 <dl class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
   <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
@@ -10,12 +26,16 @@
     <dd class="mt-1 text-2xl font-semibold tracking-tight text-white tnum">{{ vermoegen | eur }}</dd>
   </div>
   <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
+    {% if ausstehend %}
+    <dt class="text-sm text-zinc-400">Einnahmen {{ ym }} <span class="text-zinc-500">projiziert</span></dt>
+    <dd class="mt-1 text-2xl font-semibold tracking-tight text-white tnum">{{ (einnahmen + ausstehend) | eur }}</dd>
+    <p class="mt-1 text-xs text-zinc-400 tnum">ohne Gehaltslauf {{ einnahmen | eur }} · Gehalt {{ ausstehend | eur }} erwartet{% if gehalt_tag %} ~{{ '%02d' % gehalt_tag }}.{{ ym[5:7] }}.{% endif %}</p>
+    {% else %}
     <dt class="text-sm text-zinc-400">Einnahmen {{ ym }}</dt>
     <dd class="mt-1 text-2xl font-semibold tracking-tight text-white tnum">{{ einnahmen | eur }}</dd>
     {% if gehalt_datum %}
     <p class="mt-1 text-xs text-zinc-500 tnum">davon Gehalt {{ gehalt_summe | eur }} · {{ gehalt_datum[8:10] }}.{{ gehalt_datum[5:7] }}.</p>
-    {% elif ausstehend %}
-    <p class="mt-1 text-xs text-zinc-400 tnum">Gehalt {{ ausstehend | eur }} erwartet{% if gehalt_tag %} ~{{ '%02d' % gehalt_tag }}.{{ ym[5:7] }}.{% endif %}</p>
+    {% endif %}
     {% endif %}
   </div>
   <div class="rounded-2xl bg-zinc-900 p-5 shadow-sm ring-1 ring-white/10">
@@ -70,4 +90,38 @@
     </table>
   </section>
 </div>
+
+<script>
+// Kontenrundruf: Hintergrund-Lauf (sync → categorize → check) mit Polling;
+// nach eigenem Lauf lädt die Seite neu, damit Salden/KPIs frisch sind.
+const syncBtn = document.getElementById('sync-btn');
+const syncStatus = document.getElementById('sync-status');
+const syncLogBox = document.getElementById('sync-log-box');
+const syncLog = document.getElementById('sync-log');
+let selbstGestartet = false;
+
+async function syncPoll() {
+  const s = await (await fetch('/sync/status')).json();
+  if (s.log) { syncLogBox.classList.remove('hidden'); syncLog.textContent = s.log; }
+  if (s.running) {
+    syncBtn.disabled = true;
+    syncStatus.textContent = 'läuft … DKB-Freigabe am iPhone bestätigen';
+    setTimeout(syncPoll, 3000);
+  } else {
+    syncBtn.disabled = false;
+    if (s.fertig) syncStatus.textContent =
+      `zuletzt ${s.fertig} ${s.rc === 0 ? '✓ Invarianten halten' : '⚠ mit Warnungen (Protokoll)'}`;
+    if (selbstGestartet) { selbstGestartet = false; setTimeout(() => location.reload(), 1500); }
+  }
+}
+
+syncBtn.addEventListener('click', async () => {
+  if (!confirm('Kontenrundruf starten?\n\niPhone bereithalten — die DKB-Freigabe kommt gleich.')) return;
+  syncBtn.disabled = true;
+  selbstGestartet = true;
+  await fetch('/sync/start', { method: 'POST' });
+  syncPoll();
+});
+syncPoll();
+</script>
 {% endblock %}

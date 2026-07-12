@@ -24,6 +24,7 @@ dependencies = [
     "uvicorn[standard]>=0.51.0",
     "itsdangerous>=2.2.0",
     "python-multipart>=0.0.32",
+    "ruamel-yaml>=0.18",
 ]
 
 [project.optional-dependencies]

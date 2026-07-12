@@ -210,6 +210,47 @@ def render_stichtag(data: dict) -> str:
     return _env().get_template("stichtag.tex.j2").render(d=data)
 
 
+def collect_vertraege(store: Store, mit_inaktiven: bool = False,
+                      today: date | None = None) -> dict:
+    """Verträge & Abos gruppiert fürs PDF — Datenbasis wie Web-Seite/XLSX."""
+    from .xlsx import GRUPPE_SPAREN, _abo_gruppe, _detect_abos, lade_gruppen
+    abos = _detect_abos(store, today or date.today())
+    if not mit_inaktiven:
+        abos = [a for a in abos if a["aktiv"]]
+    mapping = lade_gruppen(store)
+    gruppen: dict[str, list] = {}
+    for a in abos:
+        gruppen.setdefault(_abo_gruppe(a["kategorie"], mapping), []).append(a)
+    sortiert = sorted(
+        gruppen.items(),
+        key=lambda kv: -sum(x["jahr"] for x in kv[1] if x["aktiv"]))
+    # Sparpläne sind Vermögensaufbau, keine Kosten — im Kopf getrennt
+    # ausweisen (gleiche Semantik wie das XLSX-Verträge-Sheet)
+    sparen = sum(a["jahr"] for name, es in sortiert if name == GRUPPE_SPAREN
+                 for a in es if a["aktiv"])
+    return {
+        "created": (today or date.today()).strftime("%d.%m.%Y"),
+        "inaktive": mit_inaktiven,
+        "aktiv_n": sum(1 for a in abos if a["aktiv"]),
+        "kosten_jahr": sum(a["jahr"] for a in abos if a["aktiv"]) - sparen,
+        "sparen_jahr": sparen,
+        "gruppen": [
+            {
+                "name": name,
+                "aktiv_n": sum(1 for a in eintraege if a["aktiv"]),
+                "jahr": sum(a["jahr"] for a in eintraege if a["aktiv"]),
+                "eintraege": sorted(
+                    eintraege, key=lambda a: (not a["aktiv"], -a["jahr"])),
+            }
+            for name, eintraege in sortiert
+        ],
+    }
+
+
+def render_vertraege(data: dict) -> str:
+    return _env().get_template("vertraege.tex.j2").render(d=data)
+
+
 def build_pdf(tex_source: str, out_path: Path) -> Path:
     """Compile TeX → PDF via latexmk/LuaLaTeX; returns the PDF path."""
     latexmk = shutil.which("latexmk")

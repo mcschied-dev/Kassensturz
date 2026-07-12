@@ -104,9 +104,13 @@ Run after every import/sync/rule change; exit code 1 on warnings:
 
 - FastAPI + Jinja + Tailwind, dark mode, single-user login (PBKDF2 hash,
   signed session cookies; `web-password` to set).
-- **Dashboard** with net worth, month KPIs and a *projected* month saldo:
-  the expected salary run (configurable, or auto-derived as the median of
-  recent salary months) is factored in until it actually books.
+- **Dashboard** with net worth, month KPIs, and a **one-click sync run**:
+  all configured banks in a background thread (sync → categorize →
+  check), with live status, a collapsible log, and the last run's result
+  persisted. Income and saldo tiles show the *projected* month (expected
+  salary run — configurable, or auto-derived as the median of recent
+  salary months — with its typical booking day) until the salary actually
+  books; the as-is numbers stay visible underneath.
 - **Bookings** with full-text/account/category/date filters, pagination,
   inline category dropdown (auto-save), and technical/neutral rows hidden
   by default.
@@ -116,11 +120,23 @@ Run after every import/sync/rule change; exit code 1 on warnings:
   projections (parameterized, multiple dated inflows), a financing
   calculator, and stacked category trends. Colorblind-safe palette,
   validated against the dark surface.
-- **Contracts & subscriptions** and **settings** (category CRUD + groups,
-  dashboard/salary settings).
+- **Contracts & subscriptions** — auto-detected recurring payments,
+  grouped and expandable, with **one-click PDF export** (LaTeX, same
+  typographic canon as the reports; checkbox to include ended contracts,
+  everything expanded, costs and savings plans totaled separately).
+- **Settings** in three tabs: category CRUD + groups · dashboard/salary
+  settings · **payment providers** — manage the bank connections of
+  `config.yaml` from the browser (add/modify/delete with validation,
+  comment-preserving YAML round-trip, automatic `.bak` before every
+  write; secrets stay in the keychain). The provider tab also takes
+  **CSV uploads** for API-less detail sources (PayPal activity export,
+  credit-card portals): upload → import → categorize → integrity check
+  in one step, with safe dedup on re-uploads.
 - **Docker**: `docker build -t kassensturz .` then run with your data
   mounted (`-v ~/.kassensturz:/data -e KASSENSTURZ_WEB_PASSWORD=…`).
-  Data never goes into the image; bank syncs with 2FA stay on the host.
+  Data never goes into the image; bank syncs with 2FA stay on the host
+  (no keychain in the container — the dashboard sync button and PDF
+  export need the host).
 
 ## Quickstart (CSV only — no bank setup needed)
 
@@ -214,8 +230,9 @@ docker run -p 8420:8420 -v ~/.kassensturz:/data \
 
 ## PDF reports
 
-`report` needs a TeX Live with `latexmk` + LuaLaTeX and the Work Sans
-font installed. Everything else (XLSX, web, CLI) has no TeX dependency.
+`report`, `stichtag --pdf` and the contracts PDF in the web UI need a
+TeX Live with `latexmk` + LuaLaTeX and the Work Sans font installed.
+Everything else (XLSX, web, CLI) has no TeX dependency.
 
 ## Design
 

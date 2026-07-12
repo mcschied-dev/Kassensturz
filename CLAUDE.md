@@ -49,6 +49,7 @@ PayPal-funding-twin neutralization → YAML rules) → suggest (history → ML
 
 - Strip remaining personal context from docstrings/comments (expense
   module wording, place-word lists in `report/xlsx.py`, one chart
-  subtitle in `analyse.html`).
+  subtitle in `analyse.html`, CSV-upload preset buttons in
+  `einstellungen_provider.html`).
 - Make `WEGFALL_KATEGORIE` (`web/app.py`) configurable.
 - Replace the Tailwind Play CDN with a standalone build.

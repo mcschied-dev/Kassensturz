@@ -5,10 +5,7 @@
 <p class="mt-1 text-sm text-zinc-400">Umbenennen wirkt auf alle Buchungen · Löschen setzt Buchungen auf unkategorisiert ·
   Achtung: rules.yaml und <code>categorize</code> können Kategorien wieder befüllen — Regeln bei Umbenennungen mitziehen.</p>
 
-<nav class="mt-4 flex gap-2 text-sm">
-  <a href="/einstellungen/kategorien" class="rounded-lg bg-white/10 px-3 py-1.5 font-medium text-white ring-1 ring-white/10">Kategorien</a>
-  <a href="/einstellungen/dashboard" class="rounded-lg px-3 py-1.5 font-medium text-zinc-400 ring-1 ring-white/10 hover:bg-white/5">Dashboard</a>
-</nav>
+{% set tab = 'kategorien' %}{% include "_einstellungen_tabs.html" %}
 
 {% if konflikte %}
 <div class="mt-4 rounded-xl bg-amber-500/10 px-4 py-3 text-sm ring-1 ring-amber-500/20">
@@ -82,7 +79,7 @@
               <button class="rounded-md px-2 py-1 text-xs font-medium text-zinc-300 ring-1 ring-white/10 hover:bg-white/5">Umbenennen</button>
             </form>
             <form method="post" action="/einstellungen/kategorien/loeschen"
-                  onsubmit="return confirm('„{{ z.name }}“ löschen? {{ z.n }} Buchungen werden unkategorisiert.')">
+                  class="js-loeschen" data-name="{{ z.name }}" data-n="{{ z.n }}">
               <input type="hidden" name="name" value="{{ z.name }}">
               <button class="rounded-md px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-red-500/20 hover:bg-red-500/10">Löschen</button>
             </form>
@@ -93,4 +90,14 @@
     </tbody>
   </table>
 </div>
+
+<script>
+// Bestätigung liest den Kategorienamen aus data-Attributen — Namen sind
+// frei editierbar und dürfen nie in einen JS-String-Kontext gerendert werden
+document.querySelectorAll('form.js-loeschen').forEach(f =>
+  f.addEventListener('submit', e => {
+    if (!confirm(`„${f.dataset.name}“ löschen? ${f.dataset.n} Buchungen werden unkategorisiert.`))
+      e.preventDefault();
+  }));
+</script>
 {% endblock %}

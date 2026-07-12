@@ -1,0 +1,6 @@
+<nav class="mt-4 flex gap-2 text-sm">
+  {% for slug, label in [('kategorien', 'Kategorien'), ('dashboard', 'Dashboard'), ('provider', 'Zahlungsanbieter')] %}
+  <a href="/einstellungen/{{ slug }}"
+     class="rounded-lg px-3 py-1.5 font-medium ring-1 ring-white/10 {{ 'bg-white/10 text-white' if tab == slug else 'text-zinc-400 hover:bg-white/5' }}">{{ label }}</a>
+  {% endfor %}
+</nav>

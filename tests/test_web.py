@@ -65,6 +65,120 @@ def test_dashboard_gehaltslauf_projektion(client):
     assert "ohne Gehaltslauf" in d and "ausstehend" in d and "5.000,00" in d
 
 
+def test_provider_verwaltung(client, tmp_path, monkeypatch):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "# Kopf-Kommentar bleibt erhalten\n"
+        "dkb:\n"
+        "  - name: dkb\n"
+        '    username: "user_p"   # Login-Kommentar\n',
+        encoding="utf-8")
+    monkeypatch.setenv("KASSENSTURZ_CONFIG", str(cfg))
+    client.post("/login", data={"password": "test123"})
+
+    seite = client.get("/einstellungen/provider").text
+    assert "dkb" in seite and "Neue Verbindung" in seite
+
+    # anlegen (traderepublic) + Namens-Kollision abgewiesen
+    r = client.post("/einstellungen/provider/anlegen",
+                    data={"typ": "traderepublic",
+                          "text": 'name: tr\nphone: "+49151000"'},
+                    follow_redirects=True)
+    assert "Gespeichert" in r.text and "name: tr" in r.text
+    r = client.post("/einstellungen/provider/anlegen",
+                    data={"typ": "dkb", "text": "name: tr\nusername: x"},
+                    follow_redirects=True)
+    assert "schon vergeben" in r.text
+
+    # modify: Kommentare der Datei überleben den Round-Trip
+    client.post("/einstellungen/provider/speichern",
+                data={"typ": "dkb", "name": "dkb",
+                      "text": 'name: dkb\nusername: "neu_p"'})
+    inhalt = cfg.read_text(encoding="utf-8")
+    assert "Kopf-Kommentar bleibt erhalten" in inhalt
+    assert "neu_p" in inhalt
+    assert cfg.with_suffix(".yaml.bak").exists()
+
+    # Validierung: Pflichtfeld fehlt → Fehler, Datei unverändert
+    r = client.post("/einstellungen/provider/speichern",
+                    data={"typ": "traderepublic", "name": "tr",
+                          "text": "name: tr"},  # phone fehlt
+                    follow_redirects=True)
+    assert "Validierung fehlgeschlagen" in r.text
+    assert "+49151000" in cfg.read_text(encoding="utf-8")
+
+    # delete
+    client.post("/einstellungen/provider/loeschen",
+                data={"typ": "traderepublic", "name": "tr"})
+    assert "traderepublic" not in cfg.read_text(encoding="utf-8")
+
+
+def test_provider_csv_upload(client, tmp_path):
+    client.post("/login", data={"password": "test123"})
+    seite = client.get("/einstellungen/provider").text
+    assert "CSV-Import" in seite and "csvPreset('paypal', 'paypal')" in seite
+
+    csv_inhalt = (b"date,amount,counterparty,purpose\n"
+                  b"2026-07-01,-12.34,Testshop,Upload-Kauf\n"
+                  b"2026-07-02,-5.00,Testshop,Upload-Kauf 2\n")
+    r = client.post(
+        "/einstellungen/provider/upload",
+        files={"datei": ("export.csv", csv_inhalt, "text/csv")},
+        data={"profil": "generic", "konto": "upload-test"},
+        follow_redirects=True)
+    assert "2 neu, 0 Duplikate" in r.text
+    # Datei liegt im Projekt-csv/, Buchung ist in der DB sichtbar
+    assert list((tmp_path / "csv").glob("upload_*export.csv"))
+    assert "Testshop" in client.get(
+        "/buchungen", params={"konto": "upload-test"}).text
+    # Re-Upload = reine Dubletten (Dedup), kein Doppelimport
+    r = client.post(
+        "/einstellungen/provider/upload",
+        files={"datei": ("export.csv", csv_inhalt, "text/csv")},
+        data={"profil": "generic", "konto": "upload-test"},
+        follow_redirects=True)
+    assert "0 neu, 2 Duplikate" in r.text
+    # kaputte Eingaben: falsches Profil / falsche Endung
+    r = client.post(
+        "/einstellungen/provider/upload",
+        files={"datei": ("export.csv", csv_inhalt, "text/csv")},
+        data={"profil": "gibtsnicht", "konto": "x"}, follow_redirects=True)
+    assert "unbekanntes Profil" in r.text
+    r = client.post(
+        "/einstellungen/provider/upload",
+        files={"datei": ("export.xlsx", b"x", "application/octet-stream")},
+        data={"profil": "generic", "konto": "x"}, follow_redirects=True)
+    assert "nur .csv" in r.text
+
+
+def test_kontenrundruf_endpoints(client, monkeypatch):
+    from kassensturz.web import app as webapp
+
+    client.post("/login", data={"password": "test123"})
+    d = client.get("/").text
+    assert 'id="sync-btn"' in d and "Kontenrundruf" in d
+
+    # Worker mocken — der echte würde Banken abrufen
+    def fake_worker(db_path, projekt):
+        webapp.SYNC_STATE.update(running=False, rc=0,
+                                 fertig="12.07.2026 16:00", log="$ ok")
+    monkeypatch.setattr(webapp, "_sync_worker", fake_worker)
+    monkeypatch.setitem(webapp.SYNC_STATE, "running", False)
+
+    assert client.post("/sync/start").json()["running"] is True
+    import time
+    for _ in range(50):  # Thread beendet sich sofort (fake)
+        s = client.get("/sync/status").json()
+        if not s["running"]:
+            break
+        time.sleep(0.05)
+    assert s["rc"] == 0 and s["log"] == "$ ok"
+    # Doppelstart-Guard
+    monkeypatch.setitem(webapp.SYNC_STATE, "running", True)
+    assert client.post("/sync/start").json().get("hinweis") == "läuft bereits"
+    monkeypatch.setitem(webapp.SYNC_STATE, "running", False)
+
+
 def test_neutrale_default_ausgeblendet(client):
     client.post("/login", data={"password": "test123"})
     # Funding-Leg (neutral) in die Test-DB legen

@@ -103,3 +103,47 @@ def test_render_produces_valid_looking_tex():
     assert "541.438,89" in tex  # balance rendered
     assert "Unterhalt Birgit — Historie" in tex
     assert "(((" not in tex  # no unrendered placeholders
+
+
+def test_vertraege_pdf_daten_und_rendering():
+    """collect_vertraege trennt Kosten von Sparplänen; Template rendert
+    ohne TeX-Sonderzeichen-Unfälle (kein latexmk nötig)."""
+    from datetime import date
+    from decimal import Decimal
+
+    from kassensturz.model import Transaction
+    from kassensturz.report.build import collect_vertraege, render_vertraege
+    from kassensturz.store import Store
+
+    store = Store(":memory:")
+    txs = []
+    for m in range(1, 8):
+        txs.append(Transaction(
+            booking_date=date(2026, m, 3), amount=Decimal("-9.99"),
+            currency="EUR", account="giro", counterparty="Netflix & Co KG",
+            purpose="abo", category="Abos & Dienste"))
+        txs.append(Transaction(
+            booking_date=date(2026, m, 28), amount=Decimal("-600.00"),
+            currency="EUR", account="giro", counterparty="Trade Republic",
+            purpose="sparplan", category="Umbuchung"))
+    # beendetes Abo: taucht nur mit mit_inaktiven auf
+    for m in range(1, 7):
+        txs.append(Transaction(
+            booking_date=date(2024, m, 3), amount=Decimal("-5.00"),
+            currency="EUR", account="giro", counterparty="Altvertrag",
+            purpose="abo", category="Abos & Dienste"))
+    store.add(txs)
+
+    nur_aktiv = collect_vertraege(store, today=date(2026, 7, 15))
+    assert nur_aktiv["kosten_jahr"] == 9_99 * 12
+    assert nur_aktiv["sparen_jahr"] == 600_00 * 12  # getrennt, keine Kosten
+    assert all(a["aktiv"] for g in nur_aktiv["gruppen"] for a in g["eintraege"])
+
+    alle = collect_vertraege(store, mit_inaktiven=True, today=date(2026, 7, 15))
+    anbieter = [a["anbieter"] for g in alle["gruppen"] for a in g["eintraege"]]
+    assert "Altvertrag" in anbieter
+
+    tex = render_vertraege(alle)
+    assert "\\documentclass" in tex
+    assert "Netflix \\& Co KG" in tex  # tex-escaped
+    assert "beendet" in tex

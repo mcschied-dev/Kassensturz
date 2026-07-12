@@ -1,0 +1,62 @@
+% kassensturz — Verträge & Abos, erstellt (((d.created|tex)))
+\documentclass[10pt,parskip=half-]{scrartcl}
+
+\usepackage{fontspec}
+\usepackage{booktabs}
+\usepackage{ragged2e}
+\usepackage[ngerman]{babel}
+\usepackage[
+  a4paper,
+  left   = 25mm,
+  right  = 35mm,
+  top    = 25mm,
+  bottom = 25mm,
+]{geometry}
+
+\setmainfont{Work Sans}[
+  UprightFeatures = {RawFeature={axis={wght=400}}},
+  BoldFeatures    = {RawFeature={axis={wght=500}}},
+  AutoFakeSlant   = 0.18,
+  Numbers         = {Monospaced,Lining},
+  Ligatures       = TeX,
+]
+\renewcommand{\familydefault}{\sfdefault}
+
+\setkomafont{section}{\normalsize\bfseries}
+\pagestyle{plain}
+\setlength{\parindent}{0pt}
+\setlength{\tabcolsep}{4pt}
+\RaggedRight
+
+\begin{document}
+
+{\LARGE\bfseries Verträge \& Abos}\\[2mm]
+{\large (((d.aktiv_n))) aktive Positionen · Kosten (((d.kosten_jahr|eur)))/Jahr · Sparpläne (((d.sparen_jahr|eur)))/Jahr((* if d.inaktive *)) — inkl. beendete Positionen((* endif *))}\\[1mm]
+erstellt am (((d.created|tex))) · automatisch erkannt aus wiederkehrenden Buchungen, Beitragswechsel zusammengeführt
+
+\vspace{6mm}
+
+((* for g in d.gruppen *))
+\section*{(((g.name|tex))) \normalfont\small — (((g.aktiv_n))) aktiv, (((g.jahr|eur)))/Jahr}
+{\footnotesize
+\begin{tabular}{@{}p{44mm}p{27mm}rlrl l@{}}
+\toprule
+Anbieter & Kategorie & Betrag & Turnus & pro Jahr & seit & Status \\
+\midrule
+((* for a in g.eintraege *))
+(((a.anbieter|tex))) & (((a.kategorie|tex))) & (((a.betrag|betrag))) & (((a.turnus|tex))) & (((a.jahr|betrag))) & (((a.seit[:7]|tex))) & ((* if a.aktiv *))aktiv((* else *))beendet (((a.letzte[:7]|tex)))((* endif *)) \\
+((* endfor *))
+\bottomrule
+\end{tabular}}
+
+\vspace{4mm}
+
+((* endfor *))
+
+\vfill
+{\footnotesize Beträge in EUR. „pro Jahr`` = Betrag auf Jahresbasis hochgerechnet
+(bei unregelmäßigen Beiträgen: Summe der letzten 365 Tage). Sparpläne sind
+Vermögensaufbau, keine Kosten.
+kassensturz — lokale Auswertung, keine Daten verlassen diesen Rechner.}
+
+\end{document}
