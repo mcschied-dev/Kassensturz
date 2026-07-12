@@ -78,12 +78,19 @@ CREATE TABLE IF NOT EXISTS spesen_akzeptiert (
   tx_hash TEXT PRIMARY KEY,
   akzeptiert_am TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Manuell als Vertrag markierte Buchungen: die Anbieter-Serie erscheint
+-- in "Verträge & Abos", auch wenn die Automatik sie (noch) nicht erkennt
+CREATE TABLE IF NOT EXISTS vertrag_markiert (
+  tx_hash TEXT PRIMARY KEY,
+  markiert_am TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 # Versionierte Migration (PRAGMA user_version): DDL läuft nur, wenn die
 # DB-Version zurückliegt — nicht bei jeder Store-Erzeugung (Review 12.07.).
 # Beim Erhöhen: Migrationsschritt unten in __init__ ergänzen.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 _DATE_LIKE = " AND booking_date LIKE ?"
@@ -141,7 +148,7 @@ class Store:
                     self.conn.execute("PRAGMA table_info(categories)")]
             if "gruppe" not in cols:
                 self.conn.execute("ALTER TABLE categories ADD COLUMN gruppe TEXT")
-            # v2: spesen_akzeptiert (steckt im SCHEMA-Script)
+            # v2: spesen_akzeptiert, v3: vertrag_markiert (im SCHEMA-Script)
             self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self.conn.commit()
 

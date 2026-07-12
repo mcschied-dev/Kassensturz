@@ -994,8 +994,56 @@ def _detect_abos(store: Store, today: date) -> list[dict]:
     # Merge zum Schluss über alle Pässe — so wird auch die Sparplan-
     # Erhöhung (600 → 1.000) zu einer Linie
     abos = _merge_vertraege(abos)
+    abos += _manuell_markierte(store, today, aliase,
+                               {a["key"] for a in abos})
     abos.sort(key=lambda a: (not a["aktiv"], -a["jahr"]))
     return abos
+
+
+def _manuell_markierte(store: Store, today: date, aliase: dict,
+                       erkannte_keys: set) -> list[dict]:
+    """Von Hand markierte Buchungen (Checkbox in der Web-UI): der Anbieter
+    erscheint als Vertrag, bis die Automatik die Serie selbst erkennt."""
+    groups: dict[tuple[str, int], list] = {}
+    for r in store.conn.execute(
+        """SELECT t.counterparty, COALESCE(t.category,'(unkategorisiert)') c,
+                  t.booking_date, t.amount_cents
+           FROM transactions t JOIN vertrag_markiert v ON v.tx_hash = t.hash
+           ORDER BY t.booking_date"""):
+        key = _abo_key(r["counterparty"])
+        key = aliase.get(key, key)
+        if key and key not in erkannte_keys:
+            groups.setdefault((key, r["amount_cents"]), []).append(r)
+    lines = []
+    for (key, amount), rows in groups.items():
+        dates = sorted({date.fromisoformat(r["booking_date"]) for r in rows})
+        gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
+        med = median(gaps) if gaps else None
+        turnus = _turnus_of(med, tolerant=True) if med else None
+        if turnus:
+            jahr = -amount * turnus[3]
+            label = turnus[2]
+        else:
+            # zu wenig Historie für einen Turnus: ehrlich als Summe der
+            # letzten 365 Tage ausweisen, Etikett "manuell"
+            cutoff = today.toordinal() - 365
+            jahr = sum(
+                -r["amount_cents"] for r in rows
+                if date.fromisoformat(r["booking_date"]).toordinal() > cutoff)
+            label = "manuell"
+        lines.append({
+            "key": key,
+            "anbieter": _anbieter(rows[-1]["counterparty"]) + " ✎",
+            "kategorie": rows[-1]["c"],
+            "turnus": label,
+            "betrag": -amount,
+            "jahr": jahr,
+            "seit": dates[0].isoformat(),
+            "letzte": dates[-1].isoformat(),
+            "n": len(rows),
+            "aktiv": (today - dates[-1]).days <= 410,
+        })
+    return lines
 
 
 # Pivot-Gruppen für die Vertragsübersicht: Gruppenzeile mit Summe,

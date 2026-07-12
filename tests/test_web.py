@@ -155,6 +155,30 @@ def test_spesen_seite_und_akzeptieren(client):
     assert r.status_code == 303
 
 
+def test_vertrag_markieren_und_dashboard_ohne_neutrale(client):
+    client.post("/login", data={"password": "test123"})
+    import re
+    seite = client.get("/buchungen").text
+    assert ">Vertrag</th>" in seite
+    tx_hash = re.search(r'name="tx_hash" value="([^"]+)"', seite).group(1)
+    # markieren → Checkbox gesetzt, Buchung erscheint als Vertrag
+    client.post("/buchungen/vertrag",
+                data={"tx_hash": tx_hash, "zurueck": "/buchungen"})
+    assert 'checked onchange' in client.get("/buchungen").text
+    v = client.get("/vertraege").text
+    assert "REWE Regensburg ✎" in v  # manuell markierte Serie sichtbar
+    # Toggle zurück
+    client.post("/buchungen/vertrag",
+                data={"tx_hash": tx_hash, "zurueck": "/buchungen"})
+    assert "REWE Regensburg ✎" not in client.get("/vertraege").text
+    # Dashboard: neutrale Buchungen tauchen in "Letzte Buchungen" nicht auf
+    client.post("/buchungen/kategorie",
+                data={"tx_hash": tx_hash, "kategorie": "Umbuchung",
+                      "zurueck": "/buchungen"})
+    d = client.get("/").text
+    assert "REWE Regensburg" not in d
+
+
 def test_provider_csv_upload(client, tmp_path):
     client.post("/login", data={"password": "test123"})
     seite = client.get("/einstellungen/provider").text

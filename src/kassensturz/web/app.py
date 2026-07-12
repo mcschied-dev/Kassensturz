@@ -216,8 +216,10 @@ def create_app(db_path: Path) -> FastAPI:
                 AND COALESCE(category,'') NOT LIKE '%(Sondereffekt)%'""",
             (ym,)).fetchone()
         letzte = s.conn.execute(
-            "SELECT booking_date, counterparty, category, amount_cents "
-            "FROM transactions ORDER BY booking_date DESC, rowid DESC LIMIT 8"
+            f"""SELECT booking_date, counterparty, category, amount_cents
+                FROM transactions
+                WHERE COALESCE(category,'') NOT IN ({neutral})
+                ORDER BY booking_date DESC, rowid DESC LIMIT 8"""
         ).fetchall()
         # Gehaltslauf-Projektion: das Gehalt bucht erst zum Monatsende —
         # ohne sie sähe der laufende Monat fast immer negativ aus. Betrag/
@@ -342,6 +344,18 @@ def create_app(db_path: Path) -> FastAPI:
         for k in kategorien:
             if k != "(unkategorisiert)":
                 kat_gruppen.setdefault(gmap.get(k, "Sonstiges"), []).append(k)
+        from ..report.xlsx import _abo_key, _detect_abos, lade_abo_aliase
+        markiert = {r[0] for r in s.conn.execute(
+            "SELECT tx_hash FROM vertrag_markiert")}
+        aliase = lade_abo_aliase(s)
+        vertrags_keys = {a["key"] for a in _detect_abos(s, date.today())}
+        def vertrag_status(r):
+            if r["hash"] in markiert:
+                return "manuell"
+            key = aliase.get(_abo_key(r["counterparty"]),
+                             _abo_key(r["counterparty"]))
+            return "auto" if key and key in vertrags_keys else ""
+        rows = [dict(r) | {"vertrag": vertrag_status(r)} for r in rows]
         return templates.TemplateResponse(request, "buchungen.html", {
             "aktiv": "buchungen", "rows": rows, "n": agg["n"],
             "summe": agg["s"], "seite": seite, "seiten":
@@ -584,6 +598,23 @@ def create_app(db_path: Path) -> FastAPI:
             "UPDATE transactions SET category = ? WHERE hash = ?",
             (kategorie or None, tx_hash))
         s.conn.commit()
+        if not zurueck.startswith("/buchungen"):
+            zurueck = "/buchungen"
+        return RedirectResponse(zurueck, status_code=303)
+
+    @app.post("/buchungen/vertrag")
+    async def vertrag_markieren(tx_hash: str = Form(...),
+                                zurueck: str = Form("/buchungen")):
+        """Toggle: Buchung von Hand als Vertrag kennzeichnen — die Serie
+        erscheint in Verträge & Abos, bis die Automatik sie erkennt."""
+        s = store()
+        with s.conn:
+            cur = s.conn.execute(
+                "DELETE FROM vertrag_markiert WHERE tx_hash = ?", (tx_hash,))
+            if cur.rowcount == 0:
+                s.conn.execute(
+                    "INSERT INTO vertrag_markiert (tx_hash) VALUES (?)",
+                    (tx_hash,))
         if not zurueck.startswith("/buchungen"):
             zurueck = "/buchungen"
         return RedirectResponse(zurueck, status_code=303)
