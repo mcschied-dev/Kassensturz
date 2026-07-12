@@ -13,9 +13,10 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse,
@@ -121,6 +122,15 @@ def create_app(db_path: Path) -> FastAPI:
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
+        # CSRF-Härtung: schreibende Requests müssen — wenn der Browser
+        # einen Origin-Header mitschickt — vom eigenen Host kommen.
+        # (Zweite Verteidigungslinie neben SameSite=strict am Cookie.)
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("origin")
+            host = request.headers.get("host", "")
+            if origin and urlparse(origin).netloc != host:
+                return PlainTextResponse("Origin-Prüfung fehlgeschlagen",
+                                         status_code=403)
         if request.url.path not in ("/login",) and not logged_in(request):
             return RedirectResponse("/login", status_code=303)
         return await call_next(request)
@@ -131,13 +141,29 @@ def create_app(db_path: Path) -> FastAPI:
         return templates.TemplateResponse(
             request, "login.html", {"fehler": None})
 
+    # Brute-Force-Bremse: PBKDF2 (300k Iterationen) macht jeden Versuch
+    # teuer, zusätzlich exponentieller Backoff je Client-IP ab dem 5. Fehler
+    login_fails: dict[str, tuple[int, float]] = {}
+    LOGIN_FREIVERSUCHE = 4
+
     @app.post("/login")
     async def login(request: Request, password: str = Form(...)):
+        ip = request.client.host if request.client else "?"
+        fails, gesperrt_bis = login_fails.get(ip, (0, 0.0))
+        if time.time() < gesperrt_bis:
+            return PlainTextResponse(
+                "Zu viele Fehlversuche — bitte kurz warten.", status_code=429)
         if auth.verify(password):
+            login_fails.pop(ip, None)
             resp = RedirectResponse("/", status_code=303)
             resp.set_cookie("session", signer.dumps({"ok": True}),
-                            httponly=True, samesite="lax", max_age=86400 * 14)
+                            httponly=True, samesite="strict",
+                            max_age=86400 * 14)
             return resp
+        fails += 1
+        sperre = (min(30 * 2 ** (fails - LOGIN_FREIVERSUCHE), 900)
+                  if fails > LOGIN_FREIVERSUCHE else 0)
+        login_fails[ip] = (fails, time.time() + sperre)
         return templates.TemplateResponse(
             request, "login.html", {"fehler": "Passwort stimmt nicht."},
             status_code=401)

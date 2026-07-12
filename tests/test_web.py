@@ -65,6 +65,31 @@ def test_dashboard_gehaltslauf_projektion(client):
     assert "ohne Gehaltslauf" in d and "ausstehend" in d and "5.000,00" in d
 
 
+def test_login_backoff_nach_fehlversuchen(client):
+    for _ in range(5):
+        assert client.post(
+            "/login", data={"password": "falsch"}).status_code == 401
+    # ab dem 5. Fehler greift die IP-Sperre — auch das RICHTIGE Passwort
+    # muss jetzt warten (sonst wäre der Backoff wirkungslos)
+    assert client.post(
+        "/login", data={"password": "test123"}).status_code == 429
+
+
+def test_origin_check_blockt_fremde_posts(client):
+    client.post("/login", data={"password": "test123"})
+    # schreibender Request mit fremdem Origin → 403 (CSRF-Härtung);
+    # eigener Origin und Requests ohne Origin-Header laufen normal
+    r = client.post("/buchungen/kategorie",
+                    data={"tx_hash": "x", "kategorie": "y"},
+                    headers={"origin": "https://boese-seite.example"})
+    assert r.status_code == 403
+    r = client.post("/buchungen/kategorie",
+                    data={"tx_hash": "gibtsnicht", "kategorie": "y"},
+                    headers={"origin": "http://testserver"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+
+
 def test_provider_verwaltung(client, tmp_path, monkeypatch):
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
