@@ -226,16 +226,20 @@ def regel_konflikte(store: Store, ruleset, min_faelle: int = 3) -> list[dict]:
     stats: dict[tuple, int] = defaultdict(int)
     beispiel: dict[tuple, str] = {}
     for r in store.conn.execute(
-            "SELECT counterparty, purpose, booking_type, account, category "
+            "SELECT counterparty, purpose, booking_type, account, "
+            "booking_date, category "
             "FROM transactions WHERE category IS NOT NULL"):
         regel_kat = next(
             (rule.name for rule in ruleset.rules
              if rule.matches(r["counterparty"], r["purpose"],
-                             r["booking_type"], r["account"])), None)
-        if r["category"] in ("PayPal-Funding (neutral)", "Umbuchung",
-                             "Kreditkarten-Abrechnung"):
-            continue  # bewusste Neutralisierungen (PayPal-Funding-Zwillinge,
-            #           Storno-Paare) — überwacht check_paypal_funding
+                             r["booking_type"], r["account"],
+                             r["booking_date"])), None)
+        neutral = ("PayPal-Funding (neutral)", "Umbuchung",
+                   "Kreditkarten-Abrechnung")
+        if r["category"] in neutral or regel_kat in neutral:
+            continue  # bewusste (Nicht-)Neutralisierungen — dieses Feld
+            #           überwachen die Zwillings-Invarianten in check
+            #           (paypal-funding / paypal-deckung), nicht der Detektor
         if regel_kat and regel_kat != r["category"]:
             key = (normalize_merchant(r["counterparty"]),
                    regel_kat, r["category"])

@@ -32,10 +32,17 @@ class Rule:
     # die PayPal-Neutralisierung sonst auch Birgits Partnerkarten-Käufe
     # ("Paypal *Ebay" auf mm-birgit) aus dem Cashflow radierte.
     account: list[re.Pattern] = field(default_factory=list)
+    # ab ist ebenfalls eine EINSCHRÄNKUNG: Regel gilt erst ab diesem
+    # Buchungsdatum (ISO). Nötig für Ära-Wechsel — die Emproof-Regeln
+    # (Geschäftsreise etc.) gelten ab 2026, davor fällt dieselbe Buchung
+    # auf die späteren Alltags-Regeln (Mobilität …) durch.
+    ab: str | None = None
 
     def matches(self, counterparty: str, purpose: str, booking_type: str,
-                account: str = "") -> bool:
+                account: str = "", booking_date: str = "") -> bool:
         if self.account and not any(p.search(account) for p in self.account):
+            return False
+        if self.ab and booking_date and booking_date < self.ab:
             return False
         return (
             any(p.search(counterparty) for p in self.counterparty)
@@ -64,6 +71,7 @@ def load_rules(path: str | Path) -> RuleSet:
             purpose=_compile(entry.get("purpose", [])),
             booking_type=_compile(entry.get("booking_type", [])),
             account=_compile(entry.get("account", [])),
+            ab=str(entry["ab"]) if entry.get("ab") else None,
         )
         for entry in data.get("categories", [])
     ]
@@ -82,7 +90,8 @@ def apply_rules(store: Store, ruleset: RuleSet) -> dict[str, int]:
     for row in store.query(uncategorized=True):
         for rule in ruleset.rules:
             if rule.matches(row["counterparty"], row["purpose"],
-                            row["booking_type"], row["account"]):
+                            row["booking_type"], row["account"],
+                            row["booking_date"]):
                 by_category.setdefault(rule.name, []).append(row["hash"])
                 break
     for category, hashes in by_category.items():

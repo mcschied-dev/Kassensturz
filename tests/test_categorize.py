@@ -95,6 +95,28 @@ def test_account_scope_grenzt_regel_ein(tmp_path):
     assert [r["account"] for r in offen] == ["mm-birgit"]
 
 
+def test_ab_datum_grenzt_regel_auf_aera_ein(tmp_path):
+    f = tmp_path / "rules.yaml"
+    f.write_text("""
+categories:
+  - name: Geschäftsreise
+    counterparty: ["uber"]
+    ab: "2026-01-01"
+  - name: Mobilität
+    counterparty: ["uber"]
+""", encoding="utf-8")
+    store = Store(":memory:")
+    store.add([
+        tx(counterparty="UBER TRIP", booking_date=date(2025, 6, 1)),
+        tx(counterparty="UBER TRIP", booking_date=date(2026, 6, 1)),
+    ])
+    counts = apply_rules(store, load_rules(f))
+    # dieselbe Buchung, zwei Ären: vor 2026 fällt sie auf Mobilität durch
+    assert counts == {"Geschäftsreise": 1, "Mobilität": 1}
+    alt = store.query(year=2025)[0]
+    assert alt["category"] == "Mobilität"
+
+
 def test_neutralize_funding_legs_nur_mit_namensgleichem_zwilling():
     store = Store(":memory:")
     store.add(
