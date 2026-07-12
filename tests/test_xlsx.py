@@ -69,6 +69,39 @@ def test_workbook_sheets_and_consolidation(tmp_path, monkeypatch):
     assert kpis25["Ausgaben"] == -99.94
 
 
+def test_abo_alias_rebranding_und_robuster_rhythmus():
+    """Rebranding (jumpers → A.I. Fitness): Alias-Einstellung verkettet die
+    Zahlungsreihe über den Namenswechsel; ein ausgelassener Monat und
+    Doppel-Abbuchungen am selben Tag zerlegen ein Abo nicht mehr."""
+    store = Store(":memory:")
+    txs = []
+    # alter Name, monatlich — mit Doppelbuchung (2 Mitgliedschaften) und
+    # einem ausgelassenen Monat (2025-01 fehlt)
+    for m in (7, 8, 9, 10, 11, 12):
+        txs.append(tx(booking_date=date(2024, m, 1), amount=Decimal("-29.90"),
+                      counterparty="jumpers fitness GmbH", category="Sport & Hobby"))
+        txs.append(tx(booking_date=date(2024, m, 1), amount=Decimal("-29.90"),
+                      counterparty="jumpers fitness GmbH", category="Sport & Hobby",
+                      purpose="zweite Mitgliedschaft"))
+    for m in (2, 3, 4, 5):
+        txs.append(tx(booking_date=date(2025, m, 1), amount=Decimal("-29.90"),
+                      counterparty="jumpers fitness GmbH", category="Sport & Hobby"))
+    # neuer Name führt die Reihe fort
+    for m in (6, 7, 8, 9, 10):
+        txs.append(tx(booking_date=date(2025, m, 1), amount=Decimal("-29.90"),
+                      counterparty="A.I. Fitness Sued GmbH", category="Sport & Hobby"))
+    store.add(txs)
+    store.setting_set("abo_aliase", "jumpers=fitness")
+
+    fit = [a for a in _detect_abos(store, today=date(2025, 10, 20))
+           if a["key"] == "fitness"]
+    assert len(fit) == 1
+    assert fit[0]["aktiv"]
+    assert fit[0]["anbieter"] == "A.I. Fitness Sued GmbH"  # aktueller Name
+    assert fit[0]["seit"] == "2024-07-01"                  # Historie erhalten
+    assert fit[0]["turnus"] == "monatlich"
+
+
 def test_versicherungen_splitten_nach_vertragsnummer():
     """Mehrere Verträge beim selben Versicherer (HUK: 2× Kfz + Motorrad)
     dürfen nicht zu einer Sammelzeile verschmelzen — Split über die

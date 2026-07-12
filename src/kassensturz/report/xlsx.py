@@ -752,12 +752,29 @@ def _regular_line(key: str, rows: list, amount: int, today: date) -> dict | None
     """Prüft eine Zahlungsreihe auf Abo-Regelmäßigkeit → Zeile oder None."""
     if len(rows) < 3:
         return None
-    dates = [date.fromisoformat(r["booking_date"]) for r in rows]
+    # Doppel-Abbuchungen am selben Tag (zwei parallele Mitgliedschaften,
+    # jumpers 2024) erzeugen 0-Tage-Gaps und zerlegten die Reihe →
+    # Rhythmus auf eindeutigen Daten prüfen
+    dates = sorted({date.fromisoformat(r["booking_date"]) for r in rows})
+    if len(dates) < 3:
+        return None
     gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
     med = median(gaps)
     turnus = _turnus_of(med)
     # Abos sind regelmäßig — unruhige Intervalle sind Einkaufsmuster
-    if turnus is None or (len(gaps) > 1 and pstdev(gaps) > 0.35 * med):
+    unruhig = (turnus is None
+               or (len(gaps) > 1 and pstdev(gaps) > 0.35 * med))
+    if unruhig and len(gaps) >= 5:
+        # EIN ausgelassener Einzug (Gap ≈ 2 Intervalle, z. B. geplatzter
+        # Monat bei A.I. Fitness) darf ein Abo nicht unsichtbar machen:
+        # größten Gap einmalig ausklammern und erneut prüfen
+        rest = sorted(gaps)[:-1]
+        med2 = median(rest)
+        t2 = _turnus_of(med2)
+        if (t2 and max(gaps) <= 2.6 * med2
+                and pstdev(rest) <= 0.35 * med2):
+            med, turnus, unruhig = med2, t2, False
+    if unruhig:
         return None
     return {
         "key": key,
@@ -917,7 +934,24 @@ def _sparplaene(store: Store, today: date) -> list[dict]:
             if (line := _regular_line(key, rows, amount, today))]
 
 
+def lade_abo_aliase(store: Store) -> dict[str, str]:
+    """Rebranding-Verknüpfungen aus der Einstellung `abo_aliase`:
+    "jumpers=fitness;altname=neuname" → alter Schlüssel zeigt auf neuen."""
+    raw = store.setting_get("abo_aliase", "")
+    aliase = {}
+    for paar in raw.replace("\n", ";").split(";"):
+        if "=" in paar:
+            alt_, neu_ = paar.split("=", 1)
+            if alt_.strip() and neu_.strip():
+                aliase[alt_.strip().lower()] = neu_.strip().lower()
+    return aliase
+
+
 def _detect_abos(store: Store, today: date) -> list[dict]:
+    # Aliase schon beim Gruppieren anwenden: so läuft die ZAHLUNGSREIHE
+    # über das Rebranding hinweg weiter (jumpers 49,80 halbjährlich +
+    # A.I. Fitness 49,80 = eine Serie), nicht erst die fertigen Linien
+    aliase = lade_abo_aliase(store)
     groups: dict[tuple[str, int], list] = {}
     for r in _q(
         store,
@@ -928,6 +962,7 @@ def _detect_abos(store: Store, today: date) -> list[dict]:
         "ORDER BY booking_date",
     ):
         key = _abo_key(r["counterparty"])
+        key = aliase.get(key, key)
         if key:
             groups.setdefault((key, r["amount_cents"]), []).append(r)
 
@@ -950,6 +985,12 @@ def _detect_abos(store: Store, today: date) -> list[dict]:
 
     abos += _versicherungen(store, today)
     abos += _sparplaene(store, today)
+    # Anbieter-Aliase (Rebranding: jumpers → A.I. Fitness): Einstellung
+    # `abo_aliase` = "alt=neu"-Paare (Semikolon-getrennt) — der Merge zieht
+    # die Historie dann zu EINER Linie zusammen, statt den alten Namen
+    # fälschlich als beendet zu führen
+    for a in abos:
+        a["key"] = aliase.get(a["key"], a["key"])
     # Merge zum Schluss über alle Pässe — so wird auch die Sparplan-
     # Erhöhung (600 → 1.000) zu einer Linie
     abos = _merge_vertraege(abos)
