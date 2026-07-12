@@ -82,11 +82,15 @@ def test_versicherungen_splitten_nach_vertragsnummer():
         txs.append(tx(booking_date=date(jahr, 3, 1), amount=Decimal("-198.21"),
                       counterparty="HUK-COBURG", category="Versicherung",
                       purpose=f"Kraftfahrt-Versicherung 663/158628-B, Gp-M 975 {jahr}"))
-    # Erst- + Folgebeitrag 14 Tage auseinander: Median-Gap darf den
-    # Vertrag nicht "beenden" (unregelmäßig-Zweig → 410-Tage-Fenster)
+    # geplatzte Lastschrift + Rücklastschrift (trägt den EIGENEN Namen!)
+    # + erfolgreicher Wiedereinzug: das Storno-Paar hebt sich auf, nur
+    # der Wiedereinzug zählt als Jahresbeitrag
     txs.append(tx(booking_date=date(2025, 12, 19), amount=Decimal("-1011.42"),
                   counterparty="HUK-COBURG", category="Versicherung",
                   purpose="Kraftfahrt-Versicherung 668/139640-W, R-MS 573, Folgebeitrag"))
+    txs.append(tx(booking_date=date(2025, 12, 22), amount=Decimal("1011.42"),
+                  counterparty="SCHIEDER MARC", category="Versicherung",
+                  purpose="RUECKLASTSCHRIFT Sonstige Gruende HUK24, KRAFTFAHRT-VERSICHERUNG 668/139640-W"))
     txs.append(tx(booking_date=date(2026, 1, 2), amount=Decimal("-1011.42"),
                   counterparty="HUK-COBURG", category="Versicherung",
                   purpose="Kraftfahrt-Versicherung 668/139640-W, R-MS 573"))
@@ -102,6 +106,8 @@ def test_versicherungen_splitten_nach_vertragsnummer():
     assert all(a["aktiv"] for a in huk)
     rxi = next(a for a in huk if "R-XI" in a["anbieter"])
     assert rxi["turnus"] == "jährlich" and rxi["jahr"] == 183220
+    rms = next(a for a in huk if "R-MS" in a["anbieter"])
+    assert rms["jahr"] == 101142  # Rückläufer verrechnet, nicht verdoppelt
 
 
 def test_abos_merge_namensvarianten_und_finden_jahresversicherungen():

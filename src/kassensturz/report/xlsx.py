@@ -815,20 +815,41 @@ def _versicherungen(store: Store, today: date) -> list[dict]:
     Rhion, HUK …) haben selten 3× denselben Betrag, und ein frisch
     abgeschlossener Vertrag (Stuttgarter) hat erst eine Zahlung."""
     groups: dict[tuple[str, str, str], list] = {}
+    # Rücklastschrift-Gutschriften tragen den EIGENEN Namen als Absender
+    # (nicht den Versicherer) — Zuordnung läuft über die Vertragsnummer im
+    # Zweck; gesammelt je Nummer, verrechnet unten gegen die Belastungen
+    ruecklaeufer: dict[str, list] = {}
     for r in _q(
         store,
         "SELECT counterparty, purpose, COALESCE(category,'(unkategorisiert)') c,"
         "       booking_date, amount_cents "
-        f"FROM transactions WHERE amount_cents < 0 {_BASE} "
+        f"FROM transactions WHERE amount_cents != 0 {_BASE} "
         "AND category LIKE '%ersicherung%' ORDER BY booking_date",
     ):
+        m = _VERTRAG_NR.search(r["purpose"] or "")
+        nr = m.group(1) if m else ""
+        if r["amount_cents"] > 0:
+            if nr and "lastschrift" in (r["purpose"] or "").lower():
+                ruecklaeufer.setdefault(nr, []).append(r)
+            continue
         key = _abo_key(r["counterparty"])
         if key:
-            m = _VERTRAG_NR.search(r["purpose"] or "")
-            groups.setdefault((key, r["c"], m.group(1) if m else ""), []).append(r)
+            groups.setdefault((key, r["c"], nr), []).append(r)
 
     lines = []
     for (key, cat, nr), rows in groups.items():
+        # Storno-Paare verrechnen: geplatzte Lastschrift + Rücklastschrift
+        # (gleiche Vertragsnummer, gleicher Betrag, ≤ 35 Tage) heben sich
+        # auf — sonst zählt der Rückläufer als zweiter Jahresbeitrag
+        for gut in ruecklaeufer.get(nr, []):
+            gd = date.fromisoformat(gut["booking_date"])
+            for i, r in enumerate(rows):
+                if (r["amount_cents"] == -gut["amount_cents"] and
+                        abs((gd - date.fromisoformat(r["booking_date"])).days) <= 35):
+                    del rows[i]
+                    break
+        if not rows:
+            continue
         dates = [date.fromisoformat(r["booking_date"]) for r in rows]
         gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
         # Einzelzahlung = frischer Vertrag → als Jahresbeitrag annehmen
