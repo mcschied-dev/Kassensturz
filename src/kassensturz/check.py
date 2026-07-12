@@ -279,7 +279,8 @@ def _spesen_candidates(store: Store) -> list[dict]:
     return [
         dict(r)
         for r in store.conn.execute(
-            f"""SELECT booking_date, account, counterparty, purpose, amount_cents
+            f"""SELECT hash, booking_date, account, counterparty, purpose,
+                       amount_cents
                 FROM transactions
                 WHERE amount_cents < 0 AND booking_date >= ?
                   AND account != 'mm-birgit'
@@ -326,8 +327,16 @@ def match_spesen(store: Store, today: date | None = None) -> dict:
     expenses = _spesen_candidates(store)
     reimbs = _spesen_reimbursements(store)
     open_reimbs = list(reimbs)
+    # Von Marc abgehakte Belege (nicht eingereicht / Differenz akzeptiert):
+    # nehmen an keinem Matching teil und zählen nie als offen
+    akzeptiert = {r[0] for r in store.conn.execute(
+        "SELECT tx_hash FROM spesen_akzeptiert")}
     for e in expenses:
         e["sammel"] = False
+        e["akzeptiert"] = e["hash"] in akzeptiert
+        if e["akzeptiert"]:
+            e["matched"] = None
+            continue
         for r in open_reimbs:
             gap = (date.fromisoformat(r["booking_date"])
                    - date.fromisoformat(e["booking_date"])).days
@@ -345,7 +354,7 @@ def match_spesen(store: Store, today: date | None = None) -> dict:
         budget = r["amount_cents"]
         rd = date.fromisoformat(r["booking_date"])
         for e in expenses:
-            if e["matched"] is not None:
+            if e["matched"] is not None or e["akzeptiert"]:
                 continue
             gap = (rd - date.fromisoformat(e["booking_date"])).days
             if 0 <= gap <= SPESEN_SAMMEL_DAYS and -e["amount_cents"] <= budget:
@@ -356,6 +365,7 @@ def match_spesen(store: Store, today: date | None = None) -> dict:
     unmatched = [
         e for e in expenses
         if e["matched"] is None
+        and not e["akzeptiert"]
         and -e["amount_cents"] >= SPESEN_MIN_CENTS
         and (today - date.fromisoformat(e["booking_date"])).days > SPESEN_GRACE_DAYS
     ]

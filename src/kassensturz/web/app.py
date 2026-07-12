@@ -8,19 +8,23 @@ Start: `kassensturz web` oder Docker (siehe Dockerfile).
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, File, Form, Query, Request, UploadFile
-from fastapi.responses import (FileResponse, HTMLResponse,
-                               PlainTextResponse, RedirectResponse)
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
@@ -101,7 +105,21 @@ def _alle_kategorien(s) -> list[str]:
 
 
 def create_app(db_path: Path) -> FastAPI:
-    app = FastAPI(title="kassensturz", docs_url=None, redoc_url=None)
+    # EINE geteilte Verbindung für die ganze Web-App statt einer pro
+    # Request (Review 12.07.: Stores wurden nie geschlossen → Deskriptor-/
+    # Lock-Leck). Alle Handler sind async und laufen im Event-Loop-Thread,
+    # SQLite-Zugriffe sind damit serialisiert. ACHTUNG: deshalb hier NIE
+    # sync-Routen (def statt async def) einführen — die liefen im
+    # Threadpool. Der Sync-Worker-Thread nutzt bewusst einen eigenen Store.
+    web_store = Store(db_path, check_same_thread=False)
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        yield
+        web_store.close()
+
+    app = FastAPI(title="kassensturz", docs_url=None, redoc_url=None,
+                  lifespan=lifespan)
     templates = Jinja2Templates(directory=str(TEMPLATES))
     # Tailwind + ECharts sind gevendort (kein CDN): local-first heißt
     # offline-fähig und keine Skripte von fremden Hosts (SRI-Problem entfällt)
@@ -114,7 +132,7 @@ def create_app(db_path: Path) -> FastAPI:
     signer = URLSafeSerializer(auth.secret_key(), salt="session")
 
     def store() -> Store:
-        return Store(db_path)
+        return web_store
 
     def logged_in(request: Request) -> bool:
         cookie = request.cookies.get("session")
@@ -334,11 +352,6 @@ def create_app(db_path: Path) -> FastAPI:
             "kat_gruppen": dict(sorted(kat_gruppen.items())),
         })
 
-    # Das Entnahme-Szenario ist bewusst generisch benannt (Kapitalentnahme +
-    # Nebenkosten + wegfallende laufende Zahlung) — welche Lebenslage dahinter
-    # steht, steckt nur in den lokal gesetzten Parametern, nicht im Code.
-    WEGFALL_KATEGORIE = "Unterhalt Birgit"
-
     @app.get("/analyse", response_class=HTMLResponse)
     async def analyse(request: Request, entnahme: float = 300_000,
                       kosten: float = 25_000, wirksam: str = "2027-01",
@@ -346,6 +359,9 @@ def create_app(db_path: Path) -> FastAPI:
                       zufluss_ab: list[str] = Query(default=["2027-01"])):
         from collections import defaultdict
         s = store()
+        # Szenario „wegfallende laufende Zahlung": Kategorie kommt aus den
+        # Einstellungen (Tab Dashboard) — kein Personenbezug im Code
+        wegfall_kategorie = s.setting_get("wegfall_kategorie", "")
         neutral = ",".join(f"'{c}'" for c in NEUTRAL)
         rows = s.conn.execute(
             f"""SELECT substr(booking_date,1,7) ym,
@@ -381,7 +397,7 @@ def create_app(db_path: Path) -> FastAPI:
         sonder_ein = [round(s_pos.get(m, 0) / 100, 2) for m in monate]
         sonder_aus = [round(s_neg.get(m, 0) / 100, 2) for m in monate]
         wegfall_hist = [
-            round(-min(0, per[m].get(WEGFALL_KATEGORIE, 0)) / 100, 2)
+            round(-min(0, per[m].get(wegfall_kategorie, 0)) / 100, 2)
             for m in monate]
 
         # Top-6-Ausgabenkategorien der letzten 24 Monate, Rest gebündelt
@@ -424,7 +440,7 @@ def create_app(db_path: Path) -> FastAPI:
         verm0 = sum(b["balance_cents"] for b in s.latest_balances()
                     if b["currency"] == "EUR") / 100
         zins_delta = (entnahme + kosten) * 0.01 / 12
-        wegfall_fc = [fc["werte"].get((m, WEGFALL_KATEGORIE), 0) / 100
+        wegfall_fc = [fc["werte"].get((m, wegfall_kategorie), 0) / 100
                       for m in fc["monate"]]
         basis_pfad, szen_pfad = [], []
         v_basis = v_szen = verm0
@@ -503,10 +519,30 @@ def create_app(db_path: Path) -> FastAPI:
             **collect_spesen_monat(s, monat),
         })
 
+    @app.post("/spesen/akzeptieren")
+    async def spesen_akzeptieren(tx_hash: str = Form(...),
+                                 monat: str = Form("")):
+        """Toggle: Beleg abhaken (nicht eingereicht / Differenz akzeptiert)
+        bzw. wieder öffnen — zählt dann nicht mehr als offen."""
+        s = store()
+        with s.conn:
+            cur = s.conn.execute(
+                "DELETE FROM spesen_akzeptiert WHERE tx_hash = ?", (tx_hash,))
+            if cur.rowcount == 0:
+                s.conn.execute(
+                    "INSERT INTO spesen_akzeptiert (tx_hash) VALUES (?)",
+                    (tx_hash,))
+        return RedirectResponse("/spesen?monat=" + quote(monat),
+                                status_code=303)
+
     @app.get("/spesen/pdf")
     async def spesen_pdf(monat: str = ""):
-        from ..report.build import (build_pdf, collect_spesen_monat,
-                                    render_spesen, spesen_monate)
+        from ..report.build import (
+            build_pdf,
+            collect_spesen_monat,
+            render_spesen,
+            spesen_monate,
+        )
         s = store()
         monate = spesen_monate(s)
         if monat not in monate:
@@ -523,8 +559,7 @@ def create_app(db_path: Path) -> FastAPI:
 
     @app.get("/vertraege/pdf")
     async def vertraege_pdf(inaktive: int = 0):
-        from ..report.build import (build_pdf, collect_vertraege,
-                                    render_vertraege)
+        from ..report.build import build_pdf, collect_vertraege, render_vertraege
         s = store()
         data = collect_vertraege(s, mit_inaktiven=bool(inaktive))
         try:
@@ -591,6 +626,7 @@ def create_app(db_path: Path) -> FastAPI:
                 "aktiv": "einstellungen", "meldung": meldung,
                 "gehalt_kategorie": gehalt_kat,
                 "gehalt_erwartet": s.setting_get("gehalt_erwartet", ""),
+                "wegfall_kategorie": s.setting_get("wegfall_kategorie", ""),
                 "effektiv": erwartet,
                 "kategorien": [k for k in _alle_kategorien(s)
                                if k != "(unkategorisiert)"],
@@ -599,8 +635,8 @@ def create_app(db_path: Path) -> FastAPI:
     @app.get("/einstellungen/provider", response_class=HTMLResponse)
     async def provider_seite(request: Request, meldung: str = "",
                              fehler: str = ""):
-        from . import providercfg
         from ..connectors.csv_import import PROFILES
+        from . import providercfg
         return templates.TemplateResponse(
             request, "einstellungen_provider.html", {
                 "aktiv": "einstellungen", "meldung": meldung,
@@ -653,8 +689,12 @@ def create_app(db_path: Path) -> FastAPI:
             neu, dubletten = s.add(import_csv(ziel, profil, konto.strip()))
         except Exception as e:
             return _provider_redirect(f"Import fehlgeschlagen ({name}): {e}")
-        from ..categorize import (apply_rules, load_rules, match_transfers,
-                                  neutralize_funding_legs)
+        from ..categorize import (
+            apply_rules,
+            load_rules,
+            match_transfers,
+            neutralize_funding_legs,
+        )
         n_kat = 0
         if (projekt / "rules.yaml").exists():
             ruleset = load_rules(projekt / "rules.yaml")
@@ -677,7 +717,8 @@ def create_app(db_path: Path) -> FastAPI:
     @app.post("/einstellungen/dashboard")
     async def dashboard_einstellungen_speichern(
             gehalt_erwartet: str = Form(""),
-            gehalt_kategorie: str = Form("Gehalt")):
+            gehalt_kategorie: str = Form("Gehalt"),
+            wegfall_kategorie: str = Form("")):
         s = store()
         wert = gehalt_erwartet.replace(",", ".").strip()
         try:
@@ -686,6 +727,7 @@ def create_app(db_path: Path) -> FastAPI:
             wert = ""  # leer = automatisch (Median der letzten Monate)
         s.setting_set("gehalt_erwartet", wert)
         s.setting_set("gehalt_kategorie", gehalt_kategorie or "Gehalt")
+        s.setting_set("wegfall_kategorie", wegfall_kategorie)
         return RedirectResponse(
             "/einstellungen/dashboard?meldung=Gespeichert.", status_code=303)
 

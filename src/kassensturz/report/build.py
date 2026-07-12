@@ -271,7 +271,9 @@ def collect_spesen_monat(store: Store, monat: str,
     belege = [e for e in result["expenses"]
               if e["booking_date"][:7] == monat]
     beglichen = [e for e in belege if e["matched"]]
-    offen = [e for e in belege if not e["matched"]]
+    akzeptiert = [e for e in belege if e.get("akzeptiert")]
+    offen = [e for e in belege
+             if not e["matched"] and not e.get("akzeptiert")]
     eingaenge = [r for r in _spesen_reimbursements(store)
                  if r["booking_date"][:7] == monat]
     return {
@@ -282,6 +284,8 @@ def collect_spesen_monat(store: Store, monat: str,
         "beglichen": -sum(e["amount_cents"] for e in beglichen),
         "offen": -sum(e["amount_cents"] for e in offen),
         "n_offen": len(offen),
+        "akzeptiert_summe": -sum(e["amount_cents"] for e in akzeptiert),
+        "n_akzeptiert": len(akzeptiert),
         "eingaenge": eingaenge,
         "eingang_summe": sum(r["amount_cents"] for r in eingaenge),
         "surplus": result["surplus"],  # Sammelreport-Überhang (global)

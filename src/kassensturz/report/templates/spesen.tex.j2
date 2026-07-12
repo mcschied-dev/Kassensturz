@@ -44,7 +44,7 @@ erstellt am (((d.created|tex))) · Beleg-Matching: gleicher Betrag, Erstattung 0
 Datum & Konto & Beleg & Betrag & Status \\
 \midrule
 ((* for b in d.belege *))
-(((b.booking_date|tex))) & (((b.account|tex))) & (((b.counterparty[:44]|tex))) & (((b.amount_cents|betrag))) & ((* if b.matched and b.sammel *))Sammelüberw. (((b.matched|tex)))((* elif b.matched *))beglichen (((b.matched|tex)))((* else *))\textbf{offen}((* endif *)) \\
+(((b.booking_date|tex))) & (((b.account|tex))) & (((b.counterparty[:44]|tex))) & (((b.amount_cents|betrag))) & ((* if b.akzeptiert *))akzeptiert((* elif b.matched and b.sammel *))Sammelüberw. (((b.matched|tex)))((* elif b.matched *))beglichen (((b.matched|tex)))((* else *))\textbf{offen}((* endif *)) \\
 ((* endfor *))
 \midrule
 \textbf{Summe} & & & \textbf{((((0 - d.angefallen) | betrag)))} & (((d.n_offen))) offen \\

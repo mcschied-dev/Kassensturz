@@ -154,8 +154,11 @@ def test_spesen_monatsbericht_daten_und_rendering():
     from decimal import Decimal
 
     from kassensturz.model import Transaction
-    from kassensturz.report.build import (collect_spesen_monat, render_spesen,
-                                          spesen_monate)
+    from kassensturz.report.build import (
+        collect_spesen_monat,
+        render_spesen,
+        spesen_monate,
+    )
     from kassensturz.store import Store
 
     store = Store(":memory:")

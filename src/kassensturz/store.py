@@ -71,7 +71,19 @@ CREATE TABLE IF NOT EXISTS balances (
   source TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (account, snapshot_date)
 );
+
+-- Bewusst nicht eingereichte / mit akzeptierter Differenz abgehakte
+-- Spesen-Belege: zählen nicht mehr als "offen" (Web-Reiter + check)
+CREATE TABLE IF NOT EXISTS spesen_akzeptiert (
+  tx_hash TEXT PRIMARY KEY,
+  akzeptiert_am TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
+
+# Versionierte Migration (PRAGMA user_version): DDL läuft nur, wenn die
+# DB-Version zurückliegt — nicht bei jeder Store-Erzeugung (Review 12.07.).
+# Beim Erhöhen: Migrationsschritt unten in __init__ ergänzen.
+SCHEMA_VERSION = 2
 
 
 _DATE_LIKE = " AND booking_date LIKE ?"
@@ -112,16 +124,26 @@ def _period_filter(year: int | None, month: int | None) -> tuple[str, list[str]]
 
 
 class Store:
-    def __init__(self, path: str | Path = ":memory:"):
+    def __init__(self, path: str | Path = ":memory:",
+                 check_same_thread: bool = True):
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(path))
+        # check_same_thread=False nur für die Web-App (eine geteilte
+        # Verbindung, alle Handler async im Event-Loop-Thread)
+        self.conn = sqlite3.connect(str(path),
+                                    check_same_thread=check_same_thread)
         self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(SCHEMA)
-        # Migration: gruppe-Spalte für Bestands-DBs (vor 07/2026)
-        cols = [r[1] for r in self.conn.execute("PRAGMA table_info(categories)")]
-        if "gruppe" not in cols:
-            self.conn.execute("ALTER TABLE categories ADD COLUMN gruppe TEXT")
+        version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if version < SCHEMA_VERSION:
+            self.conn.executescript(SCHEMA)
+            # Migration → v1: gruppe-Spalte für Bestands-DBs (vor 07/2026)
+            cols = [r[1] for r in
+                    self.conn.execute("PRAGMA table_info(categories)")]
+            if "gruppe" not in cols:
+                self.conn.execute("ALTER TABLE categories ADD COLUMN gruppe TEXT")
+            # v2: spesen_akzeptiert (steckt im SCHEMA-Script)
+            self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()

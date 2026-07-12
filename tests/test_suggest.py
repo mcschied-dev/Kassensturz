@@ -32,13 +32,17 @@ def test_suggest_erkennt_textvarianten():
     # Trainingsdaten: zwei klar getrennte Kategorien
     for name in ("REWE Regensburg", "EDEKA Markt", "Lidl Filiale 12"):
         for _ in range(40):
-            txs.append(tx(i, name, "Lebensmittel")); i += 1
+            txs.append(tx(i, name, "Lebensmittel"))
+            i += 1
     for name in ("Amazon.de", "AMZN Mktp DE", "Zalando SE"):
         for _ in range(40):
-            txs.append(tx(i, name, "Shopping")); i += 1
+            txs.append(tx(i, name, "Shopping"))
+            i += 1
     # Unkategorisiert: Textvarianten der bekannten Händler
-    txs.append(tx(i, "REWE Markt GmbH Goeppingen", None)); i += 1
-    txs.append(tx(i, "AMZN.Mktp.DE.XY123", None)); i += 1
+    txs.append(tx(i, "REWE Markt GmbH Goeppingen", None))
+    i += 1
+    txs.append(tx(i, "AMZN.Mktp.DE.XY123", None))
+    i += 1
     store.add(txs)
 
     items, meta = suggestions(store, min_confidence=0.5)

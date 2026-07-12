@@ -129,8 +129,11 @@ def train(store: Store):
                         sublinear_tf=True),
         LogisticRegression(max_iter=2000, C=10.0),
     )
+    # stratify braucht mindestens 1 Testbeispiel je Klasse — bei vielen
+    # Kategorien und 10 % Testanteil sonst ValueError (Review 12.07.)
+    stratify = labels if int(len(texts) * 0.1) >= len(set(labels)) else None
     x_tr, x_te, y_tr, y_te = train_test_split(
-        texts, labels, test_size=0.1, random_state=42, stratify=labels)
+        texts, labels, test_size=0.1, random_state=42, stratify=stratify)
     model.fit(x_tr, y_tr)
     accuracy = float(model.score(x_te, y_te))
     # fürs echte Vorhersagen auf allen Labels trainieren
@@ -183,11 +186,13 @@ def suggestions(store: Store, min_confidence: float = 0.5):
         "purpose FROM transactions WHERE category IS NULL "
         "ORDER BY booking_date"
     ).fetchall()
+    if not rows:
+        # nichts zu klassifizieren → Training sparen (Review 12.07.)
+        return [], {"accuracy": None, "n_train": 0, "n_classes": 0,
+                    "n_hist": 0, "n_ml": 0}
     model, meta = train(store)
     meta["n_hist"] = 0
     meta["n_ml"] = 0
-    if not rows:
-        return [], meta
 
     hist = historical_index(store)
     out: list[Suggestion] = []

@@ -15,7 +15,7 @@ from statistics import median, pstdev
 
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from ..store import Store

@@ -17,8 +17,12 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from .categorize import (apply_rules, load_rules, match_transfers,
-                         neutralize_funding_legs)
+from .categorize import (
+    apply_rules,
+    load_rules,
+    match_transfers,
+    neutralize_funding_legs,
+)
 from .config import DEFAULT_CONFIG, load_config
 from .connectors.csv_import import PROFILES, import_csv
 from .model import fmt_eur
@@ -392,7 +396,9 @@ def suggest(
     console.print(
         f"[dim]Pipeline: {meta['n_hist']} historisch zugeordnet · "
         f"{meta['n_ml']} per ML ({meta['n_train']} Trainingsbuchungen, "
-        f"{meta['n_classes']} Kategorien, Holdout {meta['accuracy']:.1%})[/dim]"
+        f"{meta['n_classes']} Kategorien, Holdout "
+        f"{meta['accuracy']:.1%})[/dim]" if meta["accuracy"] is not None
+        else "[dim]keine unkategorisierten Buchungen[/dim]"
     )
     if not items:
         console.print("[green]keine Vorschläge über der Schwelle[/green]")

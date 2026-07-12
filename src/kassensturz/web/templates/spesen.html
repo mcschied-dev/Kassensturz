@@ -33,7 +33,7 @@
   <div class="border-l border-[#232323] p-6">
     <dt class="label">Offen</dt>
     <dd class="tnum mt-2.5 text-[24px] {{ 'text-[#f87171]' if offen > 0 else 'text-white' }}">{{ offen | eur }}</dd>
-    <p class="mt-1.5 text-[11.5px] text-zinc-500">{{ n_offen }} Beleg(e) ohne jede Deckung</p>
+    <p class="mt-1.5 text-[11.5px] text-zinc-500">{{ n_offen }} ohne Deckung{% if n_akzeptiert %} · {{ n_akzeptiert }} akzeptiert ({{ akzeptiert_summe | eur }}){% endif %}</p>
   </div>
   <div class="border-l border-[#232323] p-6">
     <dt class="label">Erstattungs-Eingänge {{ monat }}</dt>
@@ -54,9 +54,23 @@
           <td class="w-full max-w-0 truncate py-2.5 text-white">{{ b.counterparty or b.purpose }}</td>
           <td class="tnum whitespace-nowrap py-2.5 pl-4 text-right text-white">{{ b.amount_cents | eur }}</td>
           <td class="py-2.5 pl-4 text-right">
-            {% if b.matched and b.sammel %}<span class="tag">Sammelüberw. {{ b.matched[8:10] }}.{{ b.matched[5:7] }}.</span>
+            {% if b.akzeptiert %}
+            <span class="inline-flex items-center gap-1.5"><span class="tag">akzeptiert</span>
+              <form method="post" action="/spesen/akzeptieren" class="inline">
+                <input type="hidden" name="tx_hash" value="{{ b.hash }}">
+                <input type="hidden" name="monat" value="{{ monat }}">
+                <button class="text-[11px] text-zinc-600 hover:text-zinc-300" title="wieder als offen führen">↩</button>
+              </form></span>
+            {% elif b.matched and b.sammel %}<span class="tag">Sammelüberw. {{ b.matched[8:10] }}.{{ b.matched[5:7] }}.</span>
             {% elif b.matched %}<span class="tag">beglichen {{ b.matched[8:10] }}.{{ b.matched[5:7] }}.</span>
-            {% else %}<span class="tag" style="color:#f87171;border-color:#3f1d1d">offen</span>{% endif %}</td>
+            {% else %}
+            <span class="inline-flex items-center gap-1.5"><span class="tag" style="color:#f87171;border-color:#3f1d1d">offen</span>
+              <form method="post" action="/spesen/akzeptieren" class="inline">
+                <input type="hidden" name="tx_hash" value="{{ b.hash }}">
+                <input type="hidden" name="monat" value="{{ monat }}">
+                <button class="text-[11px] text-zinc-500 hover:text-white" title="abhaken: nicht eingereicht / Differenz akzeptiert">akzeptieren</button>
+              </form></span>
+            {% endif %}</td>
         </tr>
         {% else %}
         <tr><td class="py-8 text-sm text-zinc-500">Keine Reisebelege in {{ monat }}.</td></tr>

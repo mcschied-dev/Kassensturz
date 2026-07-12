@@ -45,11 +45,18 @@ PayPal-funding-twin neutralization → YAML rules) → suggest (history → ML
 - Web scenario features are named generically (capital withdrawal /
   inflow) — semantics live in the user's local parameters, not in code.
 
-## Pre-OSS-release cleanup (known debt)
+## Known debt (deliberate, revisit before OSS release / next refactor)
 
 - Strip remaining personal context from docstrings/comments (expense
   module wording, place-word lists in `report/xlsx.py`, one chart
   subtitle in `analyse.html`, CSV-upload preset buttons in
   `einstellungen_provider.html`).
-- Make `WEGFALL_KATEGORIE` (`web/app.py`) configurable.
-- Replace the Tailwind Play CDN with a standalone build.
+- Split the three oversized modules along domain lines: `web/app.py`
+  (routes → auth/dashboard/buchungen/spesen/provider), `cli.py`
+  (command groups), `report/xlsx.py` (abo detection vs. sheet builders).
+- Transaction hash is truncated to 64 bit (`model.py`). Fine for
+  personal volumes (collision odds ~1e-12 at 10k rows), but widening to
+  full SHA-256 needs a controlled migration: hashes are primary keys
+  and referenced from `category_log` and `spesen_akzeptiert`.
+- Consider mypy/pyright; ruff (F, E4/E7/E9, I) runs via
+  `uv run ruff check src/ tests/` and must stay clean.

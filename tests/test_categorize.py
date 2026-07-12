@@ -3,8 +3,12 @@
 from datetime import date
 from decimal import Decimal
 
-from kassensturz.categorize import (apply_rules, load_rules, match_transfers,
-                                    neutralize_funding_legs)
+from kassensturz.categorize import (
+    apply_rules,
+    load_rules,
+    match_transfers,
+    neutralize_funding_legs,
+)
 from kassensturz.model import Transaction
 from kassensturz.store import Store
 

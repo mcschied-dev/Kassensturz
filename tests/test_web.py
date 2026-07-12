@@ -138,12 +138,21 @@ def test_provider_verwaltung(client, tmp_path, monkeypatch):
     assert "traderepublic" not in cfg.read_text(encoding="utf-8")
 
 
-def test_spesen_seite(client):
+def test_spesen_seite_und_akzeptieren(client):
     client.post("/login", data={"password": "test123"})
     r = client.get("/spesen")
     assert r.status_code == 200
     assert "Angefallen" in r.text and "Beglichen" in r.text
     assert 'name="monat"' in r.text and "PDF erzeugen" in r.text
+    # Abhaken-Toggle: 1. Post markiert, 2. Post nimmt zurück
+    r = client.post("/spesen/akzeptieren",
+                    data={"tx_hash": "abc123", "monat": "2026-07"},
+                    follow_redirects=False)
+    assert r.status_code == 303 and "monat=2026-07" in r.headers["location"]
+    r = client.post("/spesen/akzeptieren",
+                    data={"tx_hash": "abc123", "monat": "2026-07"},
+                    follow_redirects=False)
+    assert r.status_code == 303
 
 
 def test_provider_csv_upload(client, tmp_path):

@@ -19,7 +19,7 @@ import logging
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable
 
 import keyring
 from fints.client import FinTS3PinTanClient, NeedTANResponse

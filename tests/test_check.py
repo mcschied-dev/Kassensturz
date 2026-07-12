@@ -163,6 +163,20 @@ def test_spesen_matching_and_grace():
     assert mercure["sammel"] and mercure["matched"] == "2026-05-30"
     assert result["unmatched_total"] == 0
     assert result["surplus"] == 400_00 - 333_00
+    # abgehakter Beleg (nicht eingereicht) nimmt an keinem Matching teil
+    store.add([tx(account="mm-karte", booking_date=date(2026, 4, 20),
+                  amount=Decimal("-77.00"), counterparty="Stayery Bochum")])
+    offen = match_spesen(store, today=date(2026, 7, 1))["unmatched"]
+    assert any(e["amount_cents"] == -77_00 for e in offen)
+    h = store.conn.execute(
+        "SELECT hash FROM transactions WHERE amount_cents = -7700"
+    ).fetchone()["hash"]
+    store.conn.execute(
+        "INSERT INTO spesen_akzeptiert (tx_hash) VALUES (?)", (h,))
+    result = match_spesen(store, today=date(2026, 7, 1))
+    assert not any(e["amount_cents"] == -77_00 for e in result["unmatched"])
+    beleg = next(e for e in result["expenses"] if e["amount_cents"] == -77_00)
+    assert beleg["akzeptiert"] and beleg["matched"] is None
 
 
 def test_monthly_gaps():
