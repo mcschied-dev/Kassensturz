@@ -73,7 +73,7 @@
           data-quelle="{{ t.source }}">
         <td class="px-4 py-2.5 whitespace-nowrap text-zinc-400 tnum">{{ t.booking_date }}</td>
         <td class="px-4 py-2.5 whitespace-nowrap text-zinc-400">{{ t.account }}</td>
-        <td class="px-4 py-2.5 max-w-md">
+        <td class="js-zweck max-w-md cursor-help px-4 py-2.5">
           {%- set artikel = t.purpose | aufloesung -%}
           <div class="truncate font-medium text-white">
             {%- if artikel %}{{ artikel }} <span class="font-normal text-zinc-500">· via {{ t.counterparty }}</span>
@@ -130,7 +130,7 @@
   </span>
 </nav>
 {% endif %}
-<div id="detail-tip" class="pointer-events-none fixed z-50 hidden w-[380px] border border-[#2c2c2c] bg-[#141414] p-4 text-[12px] leading-relaxed shadow-xl"></div>
+<div id="detail-tip" class="pointer-events-none fixed z-50 w-[380px] border border-[#2c2c2c] bg-[#141414] p-4 text-[12px] leading-relaxed opacity-0 shadow-xl transition-opacity duration-200"></div>
 
 <script>
 // Detail-Hover: schwebendes Panel mit dem vollen Buchungssatz —
@@ -171,14 +171,21 @@ function platziere(e) {
   tip.style.top = `${Math.max(8, y)}px`;
 }
 
-document.querySelectorAll('tr.js-detail').forEach(tr => {
-  tr.addEventListener('mouseenter', e => {
-    baueTip(tr.dataset);
-    tip.classList.remove('hidden');
-    platziere(e);
+// dezent: nur über der Empfänger/Zweck-Zelle, kurze Anzeigeverzögerung,
+// sanftes Ein-/Ausblenden, keine Maus-Verfolgung
+let zeigTimer = null;
+document.querySelectorAll('td.js-zweck').forEach(td => {
+  td.addEventListener('mouseenter', e => {
+    zeigTimer = setTimeout(() => {
+      baueTip(td.closest('tr').dataset);
+      platziere(e);
+      tip.classList.add('opacity-100');
+    }, 260);
   });
-  tr.addEventListener('mousemove', platziere);
-  tr.addEventListener('mouseleave', () => tip.classList.add('hidden'));
+  td.addEventListener('mouseleave', () => {
+    clearTimeout(zeigTimer);
+    tip.classList.remove('opacity-100');
+  });
 });
 </script>
 {% endblock %}
