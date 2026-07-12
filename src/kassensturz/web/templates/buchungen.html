@@ -69,7 +69,10 @@
         <td class="px-4 py-2.5 whitespace-nowrap text-zinc-400 tnum">{{ t.booking_date }}</td>
         <td class="px-4 py-2.5 whitespace-nowrap text-zinc-400">{{ t.account }}</td>
         <td class="px-4 py-2.5 max-w-md">
-          <div class="truncate font-medium text-white">{{ t.counterparty or '—' }}</div>
+          {%- set artikel = t.purpose | aufloesung -%}
+          <div class="truncate font-medium text-white">
+            {%- if artikel %}{{ artikel }} <span class="font-normal text-zinc-500">· via {{ t.counterparty }}</span>
+            {%- else %}{{ t.counterparty or '—' }}{% endif -%}</div>
           <div class="truncate text-xs text-zinc-500">{{ t.purpose }}</div>
         </td>
         <td class="px-4 py-2.5 whitespace-nowrap">

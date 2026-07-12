@@ -179,6 +179,21 @@ def test_vertrag_markieren_und_dashboard_ohne_neutrale(client):
     assert "REWE Regensburg" not in d
 
 
+def test_aufgeloeste_position_statt_haendler(client, tmp_path):
+    from kassensturz.store import Store as S
+    db = tmp_path / "test.db"
+    S(db).add([Transaction(
+        booking_date=date(2026, 7, 2), amount=Decimal("-19.99"),
+        currency="EUR", account="test", counterparty="Amazon",
+        purpose="VISA Umsatz | Amazon-Auflösung: Hundeleine flexi 8m (19,99)",
+        category="Haustier")])
+    client.post("/login", data={"password": "test123"})
+    for seite in ("/", "/buchungen"):
+        html = client.get(seite).text
+        assert "Hundeleine flexi 8m" in html
+        assert "· via Amazon" in html
+
+
 def test_provider_csv_upload(client, tmp_path):
     client.post("/login", data={"password": "test123"})
     seite = client.get("/einstellungen/provider").text

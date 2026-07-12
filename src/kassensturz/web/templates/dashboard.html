@@ -113,7 +113,10 @@
         {% for t in letzte %}
         <tr class="border-b border-[#1a1a1a]">
           <td class="tnum py-2.5 pr-4 text-zinc-500">{{ t.booking_date[8:10] }}.{{ t.booking_date[5:7] }}.</td>
-          <td class="w-full max-w-0 truncate py-2.5 text-white">{{ t.counterparty or '—' }}</td>
+          <td class="w-full max-w-0 truncate py-2.5 text-white">
+            {%- set artikel = t.purpose | aufloesung -%}
+            {%- if artikel %}{{ artikel }} <span class="text-zinc-500">· via {{ t.counterparty }}</span>
+            {%- else %}{{ t.counterparty or '—' }}{% endif -%}</td>
           <td class="hidden py-2.5 pl-4 sm:table-cell"><span class="tag">{{ (t.category or '—')[:22] }}</span></td>
           <td class="tnum whitespace-nowrap py-2.5 pl-6 text-right {{ 'text-[#f87171]' if t.amount_cents < 0 else 'text-[#60a5fa]' }}">{{ t.amount_cents | eur }}</td>
         </tr>

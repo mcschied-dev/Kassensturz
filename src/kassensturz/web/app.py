@@ -8,6 +8,7 @@ Start: `kassensturz web` oder Docker (siehe Dockerfile).
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -129,6 +130,13 @@ def create_app(db_path: Path) -> FastAPI:
     # Projektordner (rules.yaml) = Startverzeichnis von `kassensturz web`
     projekt = Path.cwd()
     templates.env.filters["eur"] = lambda cents: fmt_eur(int(cents))
+    # „echte Position" statt Zahlungsdienstleister: die Amazon-/Apple-
+    # Auflösungen hängen als "| X-Auflösung: Artikel" im Verwendungszweck —
+    # der Filter zieht den Artikeltext fürs Anzeigen heraus
+    aufl_re = re.compile(r"[\w.\- ]*-Auflösung:\s*(.+)$")
+    templates.env.filters["aufloesung"] = (
+        lambda purpose: (m.group(1).strip()
+                         if (m := aufl_re.search(purpose or "")) else ""))
     signer = URLSafeSerializer(auth.secret_key(), salt="session")
 
     def store() -> Store:
@@ -216,7 +224,8 @@ def create_app(db_path: Path) -> FastAPI:
                 AND COALESCE(category,'') NOT LIKE '%(Sondereffekt)%'""",
             (ym,)).fetchone()
         letzte = s.conn.execute(
-            f"""SELECT booking_date, counterparty, category, amount_cents
+            f"""SELECT booking_date, counterparty, category, amount_cents,
+                       purpose
                 FROM transactions
                 WHERE COALESCE(category,'') NOT IN ({neutral})
                 ORDER BY booking_date DESC, rowid DESC LIMIT 8"""
