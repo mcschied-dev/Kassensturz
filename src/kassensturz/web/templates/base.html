@@ -50,6 +50,7 @@
       {% for pfad, key, label in [('/', 'dashboard', 'Dashboard'),
                                    ('/buchungen', 'buchungen', 'Buchungen'),
                                    ('/analyse', 'analyse', 'Analyse'),
+                                   ('/spesen', 'spesen', 'Spesen'),
                                    ('/vertraege', 'vertraege', 'Verträge'),
                                    ('/einstellungen/kategorien', 'einstellungen', 'Einstellungen')] %}
       <a href="{{ pfad }}" class="{{ 'font-medium text-white' if aktiv == key else 'text-zinc-400 hover:text-white' }}">{{ label }}</a>

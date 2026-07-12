@@ -491,6 +491,36 @@ def create_app(db_path: Path) -> FastAPI:
             "kosten_jahr": aktiv_jahr - sparen, "sparen_jahr": sparen,
         })
 
+    @app.get("/spesen", response_class=HTMLResponse)
+    async def spesen_seite(request: Request, monat: str = ""):
+        from ..report.build import collect_spesen_monat, spesen_monate
+        s = store()
+        monate = spesen_monate(s)
+        if monat not in monate:
+            monat = monate[-1] if monate else f"{date.today():%Y-%m}"
+        return templates.TemplateResponse(request, "spesen.html", {
+            "aktiv": "spesen", "monate": monate,
+            **collect_spesen_monat(s, monat),
+        })
+
+    @app.get("/spesen/pdf")
+    async def spesen_pdf(monat: str = ""):
+        from ..report.build import (build_pdf, collect_spesen_monat,
+                                    render_spesen, spesen_monate)
+        s = store()
+        monate = spesen_monate(s)
+        if monat not in monate:
+            monat = monate[-1] if monate else f"{date.today():%Y-%m}"
+        try:
+            pdf = build_pdf(
+                render_spesen(collect_spesen_monat(s, monat)),
+                Path(tempfile.mkdtemp(prefix="kassensturz-")) / "spesen.pdf")
+        except RuntimeError as e:
+            return PlainTextResponse(f"PDF-Erzeugung fehlgeschlagen: {e}",
+                                     status_code=503)
+        return FileResponse(pdf, media_type="application/pdf",
+                            filename=f"spesen-{monat}.pdf")
+
     @app.get("/vertraege/pdf")
     async def vertraege_pdf(inaktive: int = 0):
         from ..report.build import (build_pdf, collect_vertraege,

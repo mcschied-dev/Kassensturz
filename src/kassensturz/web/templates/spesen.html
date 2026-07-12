@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Spesen — kassensturz{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="text-xl font-semibold tracking-tight text-white">Spesen</h1>
+    <p class="mt-1 text-sm text-zinc-400">Reisebelege vs. Erstattungen · Beleg-Matching: gleicher Betrag, 0–90 Tage</p>
+  </div>
+  <div class="flex items-end gap-3">
+    <form method="get" action="/spesen">
+      <label class="block"><span class="label">Monat</span>
+        <select name="monat" onchange="this.form.submit()" aria-label="Monat wählen"
+                class="mt-1 block border border-[#232323] bg-[#101010] px-2 py-1.5 text-sm text-white focus:outline-none">
+          {% for m in monate %}<option value="{{ m }}" {{ 'selected' if m == monat }}>{{ m }}</option>{% endfor %}
+        </select></label>
+    </form>
+    <form method="get" action="/spesen/pdf">
+      <input type="hidden" name="monat" value="{{ monat }}">
+      <button class="bg-white px-4 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">PDF erzeugen</button>
+    </form>
+  </div>
+</div>
+
+<dl class="mt-8 grid grid-cols-2 border-y border-[#232323] lg:grid-cols-4">
+  <div class="p-6 pl-0">
+    <dt class="label">Angefallen {{ monat }}</dt>
+    <dd class="tnum mt-2.5 text-[24px] text-white">{{ angefallen | eur }}</dd>
+  </div>
+  <div class="border-l border-[#232323] p-6">
+    <dt class="label">Beglichen</dt>
+    <dd class="tnum mt-2.5 text-[24px] text-[#60a5fa]">{{ beglichen | eur }}</dd>
+  </div>
+  <div class="border-l border-[#232323] p-6">
+    <dt class="label">Offen</dt>
+    <dd class="tnum mt-2.5 text-[24px] {{ 'text-[#f87171]' if offen > 0 else 'text-white' }}">{{ offen | eur }}</dd>
+    <p class="mt-1.5 text-[11.5px] text-zinc-500">{{ n_offen }} Beleg(e) ohne 1:1-Match</p>
+  </div>
+  <div class="border-l border-[#232323] p-6">
+    <dt class="label">Erstattungs-Eingänge {{ monat }}</dt>
+    <dd class="tnum mt-2.5 text-[24px] text-white">{{ eingang_summe | eur }}</dd>
+    <p class="mt-1.5 text-[11.5px] text-zinc-500">Sammelreport-Überhang gesamt <span class="tnum">{{ surplus | eur }}</span></p>
+  </div>
+</dl>
+
+<div class="grid grid-cols-1 gap-16 pt-10 lg:grid-cols-12">
+  <section class="lg:col-span-7">
+    <h2 class="label">Reisebelege des Monats</h2>
+    <table class="mt-2 w-full text-[13px]">
+      <tbody>
+        {% for b in belege %}
+        <tr class="border-b border-[#1a1a1a]">
+          <td class="tnum py-2.5 pr-4 text-zinc-500">{{ b.booking_date[8:10] }}.{{ b.booking_date[5:7] }}.</td>
+          <td class="py-2.5 pr-4 text-zinc-500">{{ b.account }}</td>
+          <td class="w-full max-w-0 truncate py-2.5 text-white">{{ b.counterparty or b.purpose }}</td>
+          <td class="tnum whitespace-nowrap py-2.5 pl-4 text-right text-white">{{ b.amount_cents | eur }}</td>
+          <td class="py-2.5 pl-4 text-right">
+            {% if b.matched %}<span class="tag">beglichen {{ b.matched[8:10] }}.{{ b.matched[5:7] }}.</span>
+            {% else %}<span class="tag" style="color:#f87171;border-color:#3f1d1d">offen</span>{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td class="py-8 text-sm text-zinc-500">Keine Reisebelege in {{ monat }}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="lg:col-span-5">
+    <h2 class="label">Erstattungs-Eingänge im Monat</h2>
+    <table class="mt-2 w-full text-[13px]">
+      <tbody>
+        {% for r in eingaenge %}
+        <tr class="border-b border-[#1a1a1a]">
+          <td class="tnum py-2.5 pr-4 text-zinc-500">{{ r.booking_date[8:10] }}.{{ r.booking_date[5:7] }}.</td>
+          <td class="w-full max-w-0 truncate py-2.5 text-zinc-300">{{ r.purpose }}</td>
+          <td class="tnum whitespace-nowrap py-2.5 pl-4 text-right text-[#60a5fa]">{{ r.amount_cents | eur }}</td>
+        </tr>
+        {% else %}
+        <tr><td class="py-8 text-sm text-zinc-500">Keine Erstattungen in {{ monat }} gebucht.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="mt-4 text-[11.5px] text-zinc-600">„Offen" heißt: kein 1:1-Betrags-Match — Sammelreports decken
+      rechnerisch; Verpflegung unterwegs zählt bewusst nicht als Spesenkandidat (Pauschalen).</p>
+  </section>
+</div>
+{% endblock %}

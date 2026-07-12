@@ -1,0 +1,89 @@
+% kassensturz — Spesen-Monatsbericht (((d.monat|tex)))
+\documentclass[10pt,parskip=half-]{scrartcl}
+
+\usepackage{fontspec}
+\usepackage{booktabs}
+\usepackage{ragged2e}
+\usepackage[ngerman]{babel}
+\usepackage[
+  a4paper,
+  left   = 25mm,
+  right  = 35mm,
+  top    = 25mm,
+  bottom = 25mm,
+]{geometry}
+
+\setmainfont{Work Sans}[
+  UprightFeatures = {RawFeature={axis={wght=400}}},
+  BoldFeatures    = {RawFeature={axis={wght=500}}},
+  AutoFakeSlant   = 0.18,
+  Numbers         = {Monospaced,Lining},
+  Ligatures       = TeX,
+]
+\renewcommand{\familydefault}{\sfdefault}
+
+\setkomafont{section}{\normalsize\bfseries}
+\pagestyle{plain}
+\setlength{\parindent}{0pt}
+\setlength{\tabcolsep}{4pt}
+\RaggedRight
+
+\begin{document}
+
+{\LARGE\bfseries Spesen (((d.monat|tex)))}\\[2mm]
+{\large Angefallen (((d.angefallen|eur))) · beglichen (((d.beglichen|eur))) · offen (((d.offen|eur)))}\\[1mm]
+erstellt am (((d.created|tex))) · Beleg-Matching: gleicher Betrag, Erstattung 0–90 Tage nach der Ausgabe
+
+\vspace{6mm}
+
+\section*{Reisebelege des Monats}
+((* if d.belege *))
+{\footnotesize
+\begin{tabular}{@{}lp{22mm}p{58mm}rl@{}}
+\toprule
+Datum & Konto & Beleg & Betrag & Status \\
+\midrule
+((* for b in d.belege *))
+(((b.booking_date|tex))) & (((b.account|tex))) & (((b.counterparty[:44]|tex))) & (((b.amount_cents|betrag))) & ((* if b.matched *))beglichen (((b.matched|tex)))((* else *))\textbf{offen}((* endif *)) \\
+((* endfor *))
+\midrule
+\textbf{Summe} & & & \textbf{((((0 - d.angefallen) | betrag)))} & (((d.n_offen))) offen \\
+\bottomrule
+\end{tabular}}
+((* else *))
+Keine Reisebelege in diesem Monat.
+((* endif *))
+
+\vspace{6mm}
+
+\section*{Erstattungs-Eingänge im Monat}
+((* if d.eingaenge *))
+{\footnotesize
+\begin{tabular}{@{}lp{96mm}r@{}}
+\toprule
+Datum & Verwendungszweck & Betrag \\
+\midrule
+((* for r in d.eingaenge *))
+(((r.booking_date|tex))) & (((r.purpose[:74]|tex))) & (((r.amount_cents|betrag))) \\
+((* endfor *))
+\midrule
+\textbf{Summe} & & \textbf{(((d.eingang_summe|betrag)))} \\
+\bottomrule
+\end{tabular}}
+((* else *))
+Keine Erstattungen in diesem Monat gebucht.
+((* endif *))
+
+\vspace{6mm}
+
+{\footnotesize
+\textbf{Methodik:} „Beglichen`` = Erstattung mit exakt gleichem Betrag binnen
+90 Tagen nach dem Beleg. „Offene`` Belege können rechnerisch durch
+Sammelreports gedeckt sein (aktueller Überhang: (((d.surplus|eur)))) —
+die Gesamtabstimmung liefert \texttt{kassensturz spesen}.
+Verpflegung unterwegs läuft bewusst nicht als Spesenkandidat (Pauschalen).}
+
+\vfill
+{\footnotesize kassensturz — lokale Auswertung, keine Daten verlassen diesen Rechner.}
+
+\end{document}

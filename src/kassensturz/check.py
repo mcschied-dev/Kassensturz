@@ -295,13 +295,18 @@ def _spesen_candidates(store: Store) -> list[dict]:
 
 
 def _spesen_reimbursements(store: Store) -> list[dict]:
+    # ab SPESEN_SINCE: die Kategorie enthält auch DRACOON-Erstattungen
+    # (2022–2024, per Regel-Bereinigung 12.07.2026) — die gehören nicht in
+    # die Emproof-Abstimmung, sonst bläht sich der Sammelreport-Überhang
     return [
         dict(r)
         for r in store.conn.execute(
             """SELECT booking_date, purpose, amount_cents
                FROM transactions
                WHERE category = 'Spesen' AND amount_cents > 0
-               ORDER BY booking_date"""
+                 AND booking_date >= ?
+               ORDER BY booking_date""",
+            (SPESEN_SINCE,),
         )
     ]
 

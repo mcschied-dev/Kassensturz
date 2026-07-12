@@ -251,6 +251,47 @@ def render_vertraege(data: dict) -> str:
     return _env().get_template("vertraege.tex.j2").render(d=data)
 
 
+def spesen_monate(store: Store) -> list[str]:
+    """Monate mit Spesen-Aktivität (Kandidaten oder Erstattungen)."""
+    from ..check import _spesen_candidates, _spesen_reimbursements
+    monate = {e["booking_date"][:7] for e in _spesen_candidates(store)}
+    monate |= {r["booking_date"][:7] for r in _spesen_reimbursements(store)}
+    return sorted(monate)
+
+
+def collect_spesen_monat(store: Store, monat: str,
+                         today: date | None = None) -> dict:
+    """Monatssicht angefallen vs. beglichen — Basis für Web-Reiter + PDF.
+
+    Das Matching läuft global (Erstattungen dürfen bis 90 Tage nach dem
+    Beleg liegen, also monatsübergreifend); gefiltert wird nur die Anzeige.
+    """
+    from ..check import _spesen_reimbursements, match_spesen
+    result = match_spesen(store, today=today)
+    belege = [e for e in result["expenses"]
+              if e["booking_date"][:7] == monat]
+    beglichen = [e for e in belege if e["matched"]]
+    offen = [e for e in belege if not e["matched"]]
+    eingaenge = [r for r in _spesen_reimbursements(store)
+                 if r["booking_date"][:7] == monat]
+    return {
+        "monat": monat,
+        "created": (today or date.today()).strftime("%d.%m.%Y"),
+        "belege": belege,
+        "angefallen": -sum(e["amount_cents"] for e in belege),
+        "beglichen": -sum(e["amount_cents"] for e in beglichen),
+        "offen": -sum(e["amount_cents"] for e in offen),
+        "n_offen": len(offen),
+        "eingaenge": eingaenge,
+        "eingang_summe": sum(r["amount_cents"] for r in eingaenge),
+        "surplus": result["surplus"],  # Sammelreport-Überhang (global)
+    }
+
+
+def render_spesen(data: dict) -> str:
+    return _env().get_template("spesen.tex.j2").render(d=data)
+
+
 def build_pdf(tex_source: str, out_path: Path) -> Path:
     """Compile TeX → PDF via latexmk/LuaLaTeX; returns the PDF path."""
     latexmk = shutil.which("latexmk")

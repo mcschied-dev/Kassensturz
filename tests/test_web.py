@@ -138,6 +138,14 @@ def test_provider_verwaltung(client, tmp_path, monkeypatch):
     assert "traderepublic" not in cfg.read_text(encoding="utf-8")
 
 
+def test_spesen_seite(client):
+    client.post("/login", data={"password": "test123"})
+    r = client.get("/spesen")
+    assert r.status_code == 200
+    assert "Angefallen" in r.text and "Beglichen" in r.text
+    assert 'name="monat"' in r.text and "PDF erzeugen" in r.text
+
+
 def test_provider_csv_upload(client, tmp_path):
     client.post("/login", data={"password": "test123"})
     seite = client.get("/einstellungen/provider").text

@@ -147,3 +147,36 @@ def test_vertraege_pdf_daten_und_rendering():
     assert "\\documentclass" in tex
     assert "Netflix \\& Co KG" in tex  # tex-escaped
     assert "beendet" in tex
+
+
+def test_spesen_monatsbericht_daten_und_rendering():
+    from datetime import date
+    from decimal import Decimal
+
+    from kassensturz.model import Transaction
+    from kassensturz.report.build import (collect_spesen_monat, render_spesen,
+                                          spesen_monate)
+    from kassensturz.store import Store
+
+    store = Store(":memory:")
+    store.add([
+        Transaction(booking_date=date(2026, 6, 3), amount=Decimal("-220.00"),
+                    currency="EUR", account="mm-karte",
+                    counterparty="Stayery Bochum", purpose="hotel"),
+        Transaction(booking_date=date(2026, 6, 20), amount=Decimal("220.00"),
+                    currency="EUR", account="dkb",
+                    counterparty="Arbeitgeber GmbH",
+                    purpose="RNr. 110-26060099", category="Spesen"),
+        Transaction(booking_date=date(2026, 6, 25), amount=Decimal("-99.00"),
+                    currency="EUR", account="dkb",
+                    counterparty="DB Vertrieb GmbH", purpose="fahrkarte"),
+    ])
+    assert spesen_monate(store) == ["2026-06"]
+    d = collect_spesen_monat(store, "2026-06", today=date(2026, 7, 13))
+    assert d["angefallen"] == 319_00
+    assert d["beglichen"] == 220_00
+    assert d["offen"] == 99_00 and d["n_offen"] == 1
+    assert d["eingang_summe"] == 220_00
+    tex = render_spesen(d)
+    assert "\\documentclass" in tex and "Stayery Bochum" in tex
+    assert "beglichen" in tex and "offen" in tex
