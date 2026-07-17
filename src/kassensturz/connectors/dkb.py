@@ -86,7 +86,8 @@ def sync_dkb(
 
     txs: list[Transaction] = []
     skipped: list[str] = []
-    with DKBRobo(dkb_user=conn.username, dkb_password=password) as dkb:
+    with DKBRobo(dkb_user=conn.username, dkb_password=password,
+                 mfa_device=conn.mfa_device) as dkb:
         balances = extract_balances(dkb.account_dic, conn)
         for _idx, acc in sorted(dkb.account_dic.items()):
             number = acc.get("iban") or acc.get("account") or acc.get("id") or ""

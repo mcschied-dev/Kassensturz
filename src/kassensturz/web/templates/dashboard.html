@@ -23,7 +23,13 @@
       <p id="sync-status" class="tnum mt-1.5 text-[11px] text-zinc-500">
         {%- if letzter_rundruf %}zuletzt {{ letzter_rundruf }} {{ '✓' if letzter_rc == '0' else '⚠' }}{% endif -%}
       </p>
-      <details id="sync-log-box" class="mt-1 hidden text-left">
+      <div id="sync-eingabe-box" class="mt-2 hidden items-center gap-1.5">
+        <input id="sync-eingabe" placeholder="Eingabe (2FA-Code, TAN, Auswahl) …"
+               class="w-52 border border-[#232323] bg-[#101010] px-2 py-1 text-[12px] text-white focus:border-[#3a3a3a] focus:outline-none">
+        <button id="sync-senden" class="border border-[#232323] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#111]">Senden</button>
+        <button id="sync-stop" title="Rundruf abbrechen" class="px-1.5 py-1 text-[11px] text-zinc-600 hover:text-[#f87171]">✕</button>
+      </div>
+      <details id="sync-log-box" class="mt-1 hidden text-left" open>
         <summary class="cursor-pointer text-[11px] text-zinc-500">Protokoll</summary>
         <pre id="sync-log" class="mt-1 max-h-48 max-w-md overflow-auto border border-[#232323] bg-[#0d0d0d] p-3 text-[11px] leading-relaxed text-zinc-400"></pre>
       </details>
@@ -144,12 +150,18 @@ let selbstGestartet = false;
 async function syncPoll() {
   const s = await (await fetch('/sync/status')).json();
   if (s.log) { syncLogBox.classList.remove('hidden'); syncLog.textContent = s.log; }
+  const eingabeBox = document.getElementById('sync-eingabe-box');
   if (s.running) {
     syncBtn.disabled = true;
-    syncStatus.textContent = 'läuft … DKB-Freigabe am iPhone bestätigen';
-    setTimeout(syncPoll, 3000);
+    eingabeBox.classList.remove('hidden');
+    eingabeBox.classList.add('flex');
+    syncStatus.textContent = 'läuft … Captcha/Freigabe ggf. bestätigen';
+    if (syncLog) syncLog.scrollTop = syncLog.scrollHeight;
+    setTimeout(syncPoll, 2000);
   } else {
     syncBtn.disabled = false;
+    eingabeBox.classList.add('hidden');
+    eingabeBox.classList.remove('flex');
     if (s.fertig) syncStatus.textContent =
       `zuletzt ${s.fertig} ${s.rc === 0 ? '✓ Invarianten halten' : '⚠ mit Warnungen (Protokoll)'}`;
     if (selbstGestartet) { selbstGestartet = false; setTimeout(() => location.reload(), 1500); }
@@ -162,6 +174,20 @@ syncBtn.addEventListener('click', async () => {
   selbstGestartet = true;
   await fetch('/sync/start', { method: 'POST' });
   syncPoll();
+});
+async function syncSenden() {
+  const feld = document.getElementById('sync-eingabe');
+  if (!feld.value) return;
+  const fd = new FormData();
+  fd.append('text', feld.value);
+  await fetch('/sync/eingabe', { method: 'POST', body: fd });
+  feld.value = '';
+}
+document.getElementById('sync-senden').addEventListener('click', syncSenden);
+document.getElementById('sync-eingabe').addEventListener('keydown',
+  e => { if (e.key === 'Enter') syncSenden(); });
+document.getElementById('sync-stop').addEventListener('click', async () => {
+  if (confirm('Rundruf abbrechen?')) await fetch('/sync/abbruch', { method: 'POST' });
 });
 syncPoll();
 </script>

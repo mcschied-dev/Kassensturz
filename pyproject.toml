@@ -49,7 +49,7 @@ testpaths = ["tests"]
 
 [tool.uv.sources]
 # curl_cffi branch (Friendly-Captcha fix), auf Commit gepinnt (Supply-Chain)
-dkb-robo = { git = "https://github.com/grindsa/dkb-robo", rev = "5f8a46967d86dd6103424d96fa7de5840b20d86f" }
+dkb-robo = { git = "https://github.com/grindsa/dkb-robo", rev = "3cdbd1de3ae4" }
 
 [tool.ruff]
 line-length = 88

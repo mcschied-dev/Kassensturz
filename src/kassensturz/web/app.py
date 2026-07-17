@@ -8,6 +8,7 @@ Start: `kassensturz web` oder Docker (siehe Dockerfile).
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -44,10 +45,16 @@ NEUTRAL = ("Umbuchung", "Kreditkarten-Abrechnung", "PayPal-Funding (neutral)")
 # DKB-App-Freigabe). Ein Lauf zur Zeit; Status wird vom Dashboard gepollt.
 SYNC_STATE: dict = {"running": False, "rc": None, "fertig": None, "log": ""}
 _SYNC_LOCK = threading.Lock()
+_SYNC_PROC: dict = {"proc": None}
 _SYNC_LOG_MAX = 6_000
 
 
 def _sync_worker(db_path: Path, projekt: Path) -> None:
+    """Rundruf-Pipeline als gestreamte Subprozesse MIT offenem stdin:
+    Prompts (TR-2FA-Code, TAN, Geräteauswahl) warten auf Eingaben aus der
+    Web-UI (/sync/eingabe) statt an EOF zu sterben; stdout fließt live
+    ins Protokoll. Kein Timeout — Prompts warten legitim auf den Nutzer,
+    Abbruch geht über /sync/abbruch."""
     ks = Path(sys.executable).parent / "kassensturz"
     schritte = [["sync"]]
     if (projekt / "rules.yaml").exists():
@@ -57,16 +64,22 @@ def _sync_worker(db_path: Path, projekt: Path) -> None:
     try:
         for args in schritte:
             SYNC_STATE["log"] += f"\n$ kassensturz {' '.join(args)}\n"
-            p = subprocess.run(
+            proc = subprocess.Popen(
                 [str(ks), *args, "--db", str(db_path)],
-                cwd=projekt, capture_output=True, text=True, timeout=900)
-            SYNC_STATE["log"] = (SYNC_STATE["log"] + p.stdout
-                                 + (p.stderr if p.returncode else "")
-                                 )[-_SYNC_LOG_MAX:]
-            rc = p.returncode  # der letzte Schritt ist `check` → Invarianten
-    except Exception as e:  # Timeout, fehlendes Binary, …
+                cwd=projekt, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"})
+            _SYNC_PROC["proc"] = proc
+            for zeile in proc.stdout:
+                SYNC_STATE["log"] = (SYNC_STATE["log"] + zeile)[-_SYNC_LOG_MAX:]
+            proc.wait()
+            rc = proc.returncode  # letzter Schritt ist `check` → Invarianten
+    except Exception as e:  # fehlendes Binary, abgebrochener Prozess, …
         SYNC_STATE["log"] = (SYNC_STATE["log"] + f"\nFEHLER: {e}")[-_SYNC_LOG_MAX:]
         rc = 1
+    finally:
+        _SYNC_PROC["proc"] = None
     fertig = datetime.now().strftime("%d.%m.%Y %H:%M")
     SYNC_STATE.update(running=False, rc=rc, fertig=fertig)
     try:  # letzter Lauf übersteht Neustarts (Dashboard-Anzeige)
@@ -298,6 +311,26 @@ def create_app(db_path: Path) -> FastAPI:
         threading.Thread(target=_sync_worker, args=(db_path, projekt),
                          daemon=True).start()
         return {"running": True}
+
+    @app.post("/sync/eingabe")
+    async def sync_eingabe(text: str = Form("")):
+        """Eingabe an den laufenden Rundruf durchreichen (2FA-Code, TAN,
+        Geräteauswahl) — landet auf stdin des Subprozesses."""
+        proc = _SYNC_PROC.get("proc")
+        if proc and proc.poll() is None and proc.stdin:
+            proc.stdin.write(text + "\n")
+            proc.stdin.flush()
+            SYNC_STATE["log"] = (SYNC_STATE["log"] + f"› {text}\n")[-_SYNC_LOG_MAX:]
+            return {"ok": True}
+        return {"ok": False, "hinweis": "kein laufender Rundruf"}
+
+    @app.post("/sync/abbruch")
+    async def sync_abbruch():
+        proc = _SYNC_PROC.get("proc")
+        if proc and proc.poll() is None:
+            proc.terminate()
+            SYNC_STATE["log"] = (SYNC_STATE["log"] + "\n[abgebrochen]\n")[-_SYNC_LOG_MAX:]
+        return {"ok": True}
 
     @app.get("/sync/status")
     async def sync_status():

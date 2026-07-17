@@ -58,6 +58,9 @@ class DkbConnection:
     name: str  # short handle, e.g. "dkb" — also the keychain key
     username: str  # DKB web banking login
     accounts: dict[str, str] = field(default_factory=dict)  # IBAN/card → label
+    # dkb-robo fragt seit 07/2026 interaktiv nach dem MFA-Gerät, wenn
+    # mehrere registriert sind — Index hier vorwählen (1 = neuestes)
+    mfa_device: int | None = None
 
     def label_for(self, number: str) -> str | None:
         return _label_for(self.name, self.accounts, number)
@@ -138,6 +141,8 @@ def load_config(path: str | Path | None = None) -> Config:
             name=entry["name"],
             username=str(entry["username"]),
             accounts=dict(entry.get("accounts") or {}),
+            mfa_device=(int(entry["mfa_device"])
+                        if entry.get("mfa_device") else None),
         )
         for entry in (data.get("dkb") or [])
     ]

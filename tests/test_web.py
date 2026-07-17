@@ -261,6 +261,24 @@ def test_kontenrundruf_endpoints(client, monkeypatch):
     monkeypatch.setitem(webapp.SYNC_STATE, "running", True)
     assert client.post("/sync/start").json().get("hinweis") == "läuft bereits"
     monkeypatch.setitem(webapp.SYNC_STATE, "running", False)
+    # Eingabe-Brücke: ohne laufenden Prozess klare Absage; mit Fake-Prozess
+    # landet die Zeile auf stdin
+    assert client.post("/sync/eingabe",
+                       data={"text": "1234"}).json()["ok"] is False
+    import io
+
+    class FakeProc:
+        def __init__(self):
+            self.stdin = io.StringIO()
+        def poll(self):
+            return None
+    fake = FakeProc()
+    monkeypatch.setitem(webapp._SYNC_PROC, "proc", fake)
+    assert client.post("/sync/eingabe",
+                       data={"text": "1234"}).json()["ok"] is True
+    assert fake.stdin.getvalue() == "1234\n"
+    monkeypatch.setitem(webapp._SYNC_PROC, "proc", None)
+    assert client.post("/sync/abbruch").json()["ok"] is True
 
 
 def test_neutrale_default_ausgeblendet(client):

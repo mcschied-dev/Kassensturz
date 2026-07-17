@@ -405,7 +405,7 @@ wheels = [
 [[package]]
 name = "dkb-robo"
 version = "0.31.2"
-source = { git = "https://github.com/grindsa/dkb-robo?rev=5f8a46967d86dd6103424d96fa7de5840b20d86f#5f8a46967d86dd6103424d96fa7de5840b20d86f" }
+source = { git = "https://github.com/grindsa/dkb-robo?rev=3cdbd1de3ae4#3cdbd1de3ae42032c47154abf78323cd224d154a" }
 dependencies = [
     { name = "click" },
     { name = "curl-cffi" },
@@ -826,7 +826,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=49.0.0" },
-    { name = "dkb-robo", git = "https://github.com/grindsa/dkb-robo?rev=5f8a46967d86dd6103424d96fa7de5840b20d86f" },
+    { name = "dkb-robo", git = "https://github.com/grindsa/dkb-robo?rev=3cdbd1de3ae4" },
     { name = "fastapi", specifier = ">=0.139.0" },
     { name = "fints", specifier = ">=5.0.0" },
     { name = "itsdangerous", specifier = ">=2.2.0" },
