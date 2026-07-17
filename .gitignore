@@ -22,3 +22,6 @@ state/
 # OS
 .DS_Store
 budget.yaml
+
+# SeleniumBase/dkb-robo Browser-Artefakte (Captcha-Läufe)
+downloaded_files/
